@@ -101,9 +101,9 @@ function testLogin(username, password) {
       return sheetCheck;
     }
     
-    // Lấy dữ liệu users
-    const users = getSheetData(SHEET_USERS);
-    Logger.log('Total users from getSheetData:', users.length);
+    // Lấy dữ liệu users (không dùng cache)
+    const users = getUsersData();
+    Logger.log('Total users from getUsersData:', users.length);
     
     if (users.length === 0) {
       return { status: 'error', message: 'Không có dữ liệu người dùng nào trong sheet USERS' };
@@ -136,6 +136,85 @@ function testLogin(username, password) {
   }
 }
 
+function getUsersData() {
+  try {
+    Logger.log('=== GET USERS DATA (NO CACHE) ===');
+    
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_USERS);
+    
+    if (!sheet) {
+      Logger.log('Sheet USERS not found');
+      return [];
+    }
+    
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    
+    if (values.length < 2) {
+      Logger.log('Sheet USERS has no data rows');
+      return [];
+    }
+    
+    const headers = values[0].map(h => h.toString().trim());
+    const dataRows = values.slice(1);
+    
+    Logger.log('Headers found:', headers);
+    Logger.log('Data rows count:', dataRows.length);
+    
+    // Kiểm tra các cột bắt buộc
+    const requiredColumns = ['USER', 'PASS', 'ROLE', 'STATUS', 'KHO'];
+    const missingColumns = requiredColumns.filter(col => !headers.includes(col));
+    
+    if (missingColumns.length > 0) {
+      Logger.log('Missing required columns:', missingColumns);
+      return [];
+    }
+    
+    // Tạo objects từ dữ liệu
+    const users = dataRows.map((row, index) => {
+      const user = {};
+      headers.forEach((header, colIndex) => {
+        user[header] = row[colIndex];
+      });
+      
+      Logger.log(`User ${index + 1}:`, {
+        USER: user.USER,
+        ROLE: user.ROLE,
+        STATUS: user.STATUS,
+        KHO: user.KHO,
+        PASS_LENGTH: user.PASS ? user.PASS.toString().length : 0
+      });
+      
+      return user;
+    });
+    
+    Logger.log('Total users processed:', users.length);
+    return users;
+    
+  } catch (e) {
+    Logger.log('Error in getUsersData: ' + e.toString());
+    return [];
+  }
+}
+
+function clearCache() {
+  try {
+    Logger.log('=== CLEARING CACHE ===');
+    const cache = CacheService.getScriptCache();
+    
+    // Xóa cache của tất cả sheets
+    cache.removeAll([SHEET_DMHH, SHEET_DL_NHAP, SHEET_DL_XUAT, SHEET_DMTK, SHEET_USERS]);
+    
+    Logger.log('Cache cleared successfully');
+    return { status: 'success', message: 'Cache đã được xóa thành công!' };
+    
+  } catch (e) {
+    Logger.log('Error clearing cache: ' + e.toString());
+    return { status: 'error', message: 'Lỗi khi xóa cache: ' + e.toString() };
+  }
+}
+
 function checkSystemStatus() {
   try {
     Logger.log('=== SYSTEM STATUS CHECK ===');
@@ -146,9 +225,13 @@ function checkSystemStatus() {
       return { status: 'error', message: 'Sheet USERS có vấn đề: ' + sheetCheck.message };
     }
     
-    // Lấy dữ liệu users
-    const users = getSheetData(SHEET_USERS);
-    Logger.log('Total users:', users.length);
+    // Lấy dữ liệu users (không dùng cache)
+    const users = getUsersData();
+    Logger.log('Total users from getUsersData:', users.length);
+    
+    if (users.length === 0) {
+      return { status: 'error', message: 'Không có dữ liệu người dùng nào trong sheet USERS' };
+    }
     
     // Kiểm tra có admin không
     const adminUsers = users.filter(u => u.ROLE === 'admin' && u.STATUS === 'active');
@@ -159,7 +242,7 @@ function checkSystemStatus() {
     Logger.log('Accountant users:', accountantUsers.length);
     Logger.log('Warehouse users:', warehouseUsers.length);
     
-    // Kiểm tra các vấn đề
+    // Kiểm tra dữ liệu không hợp lệ
     const issues = [];
     
     if (adminUsers.length === 0) {
@@ -171,9 +254,20 @@ function checkSystemStatus() {
     }
     
     // Kiểm tra dữ liệu không hợp lệ
-    const invalidUsers = users.filter(u => !u.USER || !u.PASS || !u.ROLE || !u.STATUS);
+    const invalidUsers = users.filter(u => {
+      const hasUser = u.USER && u.USER.toString().trim() !== '';
+      const hasPass = u.PASS && u.PASS.toString().trim() !== '';
+      const hasRole = u.ROLE && u.ROLE.toString().trim() !== '';
+      const hasStatus = u.STATUS && u.STATUS.toString().trim() !== '';
+      
+      Logger.log(`User ${u.USER}: USER=${hasUser}, PASS=${hasPass}, ROLE=${hasRole}, STATUS=${hasStatus}`);
+      
+      return !hasUser || !hasPass || !hasRole || !hasStatus;
+    });
+    
     if (invalidUsers.length > 0) {
       issues.push(`${invalidUsers.length} người dùng có dữ liệu không đầy đủ`);
+      Logger.log('Invalid users:', invalidUsers.map(u => ({ USER: u.USER, ROLE: u.ROLE, STATUS: u.STATUS })));
     }
     
     return {
@@ -185,7 +279,8 @@ function checkSystemStatus() {
         accountantUsers: accountantUsers.length,
         warehouseUsers: warehouseUsers.length,
         issues: issues,
-        sheetStructure: sheetCheck.data
+        sheetStructure: sheetCheck.data,
+        users: users.map(u => ({ USER: u.USER, ROLE: u.ROLE, STATUS: u.STATUS, KHO: u.KHO }))
       }
     };
     
@@ -214,9 +309,9 @@ function login(username, password) {
       return { status: 'error', message: 'Lỗi cấu trúc dữ liệu: ' + sheetCheck.message };
     }
     
-    // Lấy dữ liệu users
-    const users = getSheetData(SHEET_USERS);
-    Logger.log('Total users from getSheetData:', users.length);
+    // Lấy dữ liệu users (không dùng cache)
+    const users = getUsersData();
+    Logger.log('Total users from getUsersData:', users.length);
     
     if (users.length === 0) {
       Logger.log('No users found in sheet');
@@ -1506,6 +1601,28 @@ function getCurrentUserInfo() {
     };
   } catch (e) {
     Logger.log('Error getting current user info: ' + e.toString());
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function getAllUsers() {
+  try {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
+    // Kiểm tra quyền admin
+    if (!checkPermission('manage_users')) {
+      return { status: 'error', message: 'Bạn không có quyền truy cập chức năng này.' };
+    }
+    
+    // Lấy dữ liệu users (không dùng cache)
+    const users = getUsersData();
+    return { status: 'success', data: users };
+  } catch (e) {
+    Logger.log('Error getting all users: ' + e.toString());
     return { status: 'error', message: e.toString() };
   }
 }

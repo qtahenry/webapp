@@ -147,13 +147,17 @@ Hệ thống có sẵn các tính năng debug để giúp khắc phục sự c�
 
 1. **Kiểm tra trạng thái hệ thống**: Xem tổng quan về người dùng và phát hiện vấn đề
 2. **Kiểm tra cấu trúc sheet**: Xem cấu trúc sheet USERS có đúng không
-3. **Logs chi tiết**: Tất cả thao tác đều được log trong Google Apps Script
+3. **Xóa cache**: Xóa cache để đảm bảo dữ liệu mới nhất
+4. **Logs chi tiết**: Tất cả thao tác đều được log trong Google Apps Script
 
 ### Cách Sử Dụng Debug
 
 1. Mở form đăng nhập
 2. Click vào "🔧 Debug & Kiểm tra hệ thống"
-3. Sử dụng các nút kiểm tra để xem thông tin chi tiết
+3. Sử dụng các nút kiểm tra để xem thông tin chi tiết:
+   - **Kiểm tra trạng thái hệ thống**: Xem tổng quan người dùng
+   - **Kiểm tra cấu trúc sheet**: Xem cấu trúc sheet USERS
+   - **Xóa cache**: Xóa cache để đảm bảo dữ liệu mới nhất
 
 ### Lỗi Thường Gặp
 

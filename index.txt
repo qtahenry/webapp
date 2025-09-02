@@ -114,6 +114,9 @@
                             <button id="debug-sheet-btn" class="w-full bg-gray-500 text-white py-2 px-3 rounded text-xs hover:bg-gray-600">
                                 Kiểm tra cấu trúc sheet
                             </button>
+                            <button id="clear-cache-btn" class="w-full bg-red-500 text-white py-2 px-3 rounded text-xs hover:bg-red-600">
+                                Xóa cache
+                            </button>
                             <div id="debug-output" class="text-xs bg-gray-100 p-2 rounded max-h-32 overflow-y-auto"></div>
                         </div>
                     </details>
@@ -3030,6 +3033,28 @@
                     $('#debug-output').text(`❌ Lỗi: ${response.message}`);
                 }
             }).debugSheetStructure();
+        });
+        
+        $('#clear-cache-btn').on('click', function() {
+            const btn = $(this);
+            const originalText = btn.text();
+            
+            btn.prop('disabled', true).text('Đang xóa...');
+            $('#debug-output').text('Đang xóa cache...');
+            
+            google.script.run.withSuccessHandler(function(response) {
+                btn.prop('disabled', false).text(originalText);
+                
+                if (response.status === 'success') {
+                    $('#debug-output').text(`✅ ${response.message}`);
+                    // Tự động kiểm tra lại hệ thống sau khi xóa cache
+                    setTimeout(() => {
+                        $('#check-system-btn').click();
+                    }, 1000);
+                } else {
+                    $('#debug-output').text(`❌ Lỗi: ${response.message}`);
+                }
+            }).clearCache();
         });
         
         // =================================================================
