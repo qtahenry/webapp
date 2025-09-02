@@ -5,6 +5,220 @@ const SHEET_DMHH = "DMHH";
 const SHEET_DL_NHAP = "DL_NHAP";
 const SHEET_DL_XUAT = "DL_XUAT";
 const SHEET_DMTK = "DMTK";
+const SHEET_USERS = "USERS";
+
+// Các role người dùng
+const USER_ROLES = {
+  ADMIN: 'admin',
+  ACCOUNTANT: 'accountant', 
+  WAREHOUSE_KEEPER: 'warehouse_keeper'
+};
+
+// =================================================================
+// HỆ THỐNG ĐĂNG NHẬP VÀ PHÂN QUYỀN
+// =================================================================
+
+// Lưu trữ session người dùng
+let currentUserSession = null;
+
+
+
+
+
+
+
+
+
+
+
+
+function login(username, password) {
+  try {
+    Logger.log('=== LOGIN ATTEMPT ===');
+    Logger.log('Username:', username);
+    Logger.log('Password:', password);
+    
+    // Kiểm tra input
+    if (!username || !password) {
+      Logger.log('Missing username or password');
+      return { status: 'error', message: 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu.' };
+    }
+    
+    // Lấy dữ liệu users
+    const users = getSheetData(SHEET_USERS);
+    Logger.log('Total users from getSheetData:', users.length);
+    
+    if (users.length === 0) {
+      Logger.log('No users found in sheet');
+      return { status: 'error', message: 'Không có dữ liệu người dùng nào trong hệ thống.' };
+    }
+    
+    // Log dữ liệu users để debug (chỉ log username và status, không log password)
+    Logger.log('Available users:', users.map(u => ({ USER: u.USER, ROLE: u.ROLE, STATUS: u.STATUS, KHO: u.KHO })));
+    
+    // Tìm user
+    const user = users.find(u => {
+      const userMatch = u.USER === username;
+      const passMatch = u.PASS === password;
+      const statusActive = u.STATUS === 'active';
+      
+      Logger.log(`User ${u.USER}: USER match=${userMatch}, PASS match=${passMatch}, STATUS active=${statusActive}`);
+      
+      return userMatch && passMatch && statusActive;
+    });
+    
+    if (!user) {
+      Logger.log('User not found or invalid credentials');
+      
+      // Kiểm tra từng điều kiện để đưa ra thông báo cụ thể
+      const foundUser = users.find(u => u.USER === username);
+      if (!foundUser) {
+        return { status: 'error', message: 'Tên đăng nhập không tồn tại trong hệ thống.' };
+      }
+      
+      if (foundUser.PASS !== password) {
+        return { status: 'error', message: 'Mật khẩu không đúng.' };
+      }
+      
+      if (foundUser.STATUS !== 'active') {
+        return { status: 'error', message: 'Tài khoản đã bị khóa hoặc không hoạt động.' };
+      }
+      
+      return { status: 'error', message: 'Tên đăng nhập hoặc mật khẩu không đúng.' };
+    }
+    
+    Logger.log('User found and validated:', { USER: user.USER, ROLE: user.ROLE, STATUS: user.STATUS, KHO: user.KHO });
+    
+    // Tạo session
+    currentUserSession = {
+      username: user.USER,
+      role: user.ROLE,
+      kho: user.KHO,
+      loginTime: new Date()
+    };
+    
+    Logger.log('Session created:', currentUserSession);
+    
+    return { 
+      status: 'success', 
+      message: 'Đăng nhập thành công!',
+      user: {
+        username: user.USER,
+        role: user.ROLE,
+        kho: user.KHO
+      }
+    };
+  } catch (e) {
+    Logger.log('Error during login: ' + e.toString());
+    return { status: 'error', message: 'Lỗi hệ thống: ' + e.toString() };
+  }
+}
+
+function logout() {
+  try {
+    currentUserSession = null;
+    return { status: 'success', message: 'Đăng xuất thành công!' };
+  } catch (e) {
+    Logger.log('Error during logout: ' + e.toString());
+    return { status: 'error', message: 'Lỗi hệ thống: ' + e.toString() };
+  }
+}
+
+function getCurrentUser() {
+  return currentUserSession;
+}
+
+function checkSession() {
+  return currentUserSession !== null;
+}
+
+function requireLogin() {
+  if (!checkSession()) {
+    return { status: 'error', message: 'Vui lòng đăng nhập để sử dụng hệ thống.' };
+  }
+  return { status: 'success' };
+}
+
+function checkPermission(permission, warehouseCode = null) {
+  if (!checkSession()) return false;
+  
+  const user = currentUserSession;
+  
+  // Admin có tất cả quyền
+  if (user.role === USER_ROLES.ADMIN) return true;
+  
+  // Kế toán có quyền của thủ kho + quyền điền giá
+  if (user.role === USER_ROLES.ACCOUNTANT) {
+    if (permission === 'edit_price') return true;
+    return true; // Có tất cả quyền khác
+  }
+  
+  // Thủ kho có quyền hạn chế
+  if (user.role === USER_ROLES.WAREHOUSE_KEEPER) {
+    // Kiểm tra quyền truy cập kho
+    if (warehouseCode && user.kho !== '*' && !user.kho.includes(warehouseCode)) {
+      return false;
+    }
+    
+    // Thủ kho không được điền giá
+    if (permission === 'edit_price') return false;
+    
+    return true;
+  }
+  
+  return false;
+}
+
+function canEditPrice() {
+  if (!checkSession()) return false;
+  return currentUserSession.role === USER_ROLES.ADMIN || currentUserSession.role === USER_ROLES.ACCOUNTANT;
+}
+
+function getUserWarehouses() {
+  if (!checkSession()) return [];
+  
+  const user = currentUserSession;
+  
+  if (user.role === USER_ROLES.ADMIN || user.role === USER_ROLES.ACCOUNTANT) {
+    // Admin và kế toán có thể xem tất cả kho
+    const products = getSheetData(SHEET_DMHH);
+    return [...new Set(products.map(p => p.MA_KHO).filter(Boolean))];
+  }
+  
+  if (user.kho === '*') {
+    // Thủ kho được phân công tất cả kho
+    const products = getSheetData(SHEET_DMHH);
+    return [...new Set(products.map(p => p.MA_KHO).filter(Boolean))];
+  }
+  
+  // Thủ kho chỉ được phân công một số kho cụ thể
+  return user.kho ? user.kho.split(',').map(w => w.trim()).filter(Boolean) : [];
+}
+
+function canEditDocument(documentType, documentData) {
+  if (!checkSession()) return false;
+  
+  const user = currentUserSession;
+  
+  // Admin có thể sửa/xóa bất kỳ lúc nào
+  if (user.role === USER_ROLES.ADMIN) return true;
+  
+  // Kế toán có thể sửa/xóa bất kỳ lúc nào
+  if (user.role === USER_ROLES.ACCOUNTANT) return true;
+  
+  // Thủ kho chỉ được sửa/xóa khi chứng từ chưa có giá
+  if (user.role === USER_ROLES.WAREHOUSE_KEEPER) {
+    // Kiểm tra xem chứng từ có giá hay không
+    const hasPrice = documentData.some(item => {
+      const price = parseFloat(item.DON_GIA) || 0;
+      return price > 0;
+    });
+    
+    return !hasPrice; // Chỉ được sửa/xóa khi chưa có giá
+  }
+  
+  return false;
+}
 
 // =================================================================
 // CÁC HÀM CƠ BẢN CỦA WEBAPP
@@ -12,7 +226,8 @@ const SHEET_DMTK = "DMTK";
 
 
 function doGet() {
-  return HtmlService.createTemplateFromFile('index')
+  const template = HtmlService.createTemplateFromFile('index');
+  return template
     .evaluate()
     .setTitle('WebApp Quản lý Kho')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
@@ -24,6 +239,34 @@ function doGet() {
 // =================================================================
 
 function getSheetData(sheetName) {
+  // Tắt cache cho sheet USERS để đảm bảo dữ liệu mới nhất
+  if (sheetName === SHEET_USERS) {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(sheetName);
+    if (!sheet) return [];
+    
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    if (values.length < 2) return [];
+
+    const headers = values.shift().map(header => header.toString().trim());
+    const data = values.map(row => {
+      let obj = {};
+      headers.forEach((header, index) => {
+        if (row[index] instanceof Date) {
+          obj[header] = Utilities.formatDate(row[index], Session.getScriptTimeZone(), "dd/MM/yyyy");
+        } else {
+          obj[header] = row[index];
+        }
+      });
+      return obj;
+    });
+    
+    Logger.log(`Read ${sheetName} data directly: ${data.length} rows`);
+    return data;
+  }
+  
+  // Sử dụng cache cho các sheet khác
   const cache = CacheService.getScriptCache();
   const cachedData = cache.get(sheetName);
 
@@ -66,6 +309,17 @@ function getPartners() {
 
 function addProduct(productData) {
   try {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
+    // Kiểm tra quyền tạo sản phẩm
+    if (!checkPermission('create_product', productData.MA_KHO)) {
+      return { status: 'error', message: 'Bạn không có quyền tạo sản phẩm cho kho này.' };
+    }
+    
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = ss.getSheetByName(SHEET_DMHH);
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
@@ -118,11 +372,26 @@ function addProduct(productData) {
 
 function addMultiProductImport(payload) {
   try {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
     const { generalInfo, productDetails } = payload;
+    
+    // Kiểm tra quyền cho từng kho trong phiếu nhập
+    const warehousesInImport = [...new Set(productDetails.map(p => p.MA_KHO))];
+    for (const warehouse of warehousesInImport) {
+      if (!checkPermission('create_import', warehouse)) {
+        return { status: 'error', message: `Bạn không có quyền tạo phiếu nhập cho kho ${warehouse}.` };
+      }
+    }
+    
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = ss.getSheetByName(SHEET_DL_NHAP);
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
-
+    
     const partners = getSheetData(SHEET_DMTK);
     const partnerMap = partners.reduce((map, partner) => {
       if (partner.MA_TK) map[partner.MA_TK] = partner;
@@ -200,7 +469,22 @@ function addMultiProductImport(payload) {
 
 function addMultiProductExport(payload) {
   try {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
     const { generalInfo, productDetails } = payload;
+    
+    // Kiểm tra quyền cho từng kho trong phiếu xuất
+    const warehousesInExport = [...new Set(productDetails.map(p => p.MA_KHO))];
+    for (const warehouse of warehousesInExport) {
+      if (!checkPermission('create_export', warehouse)) {
+        return { status: 'error', message: `Bạn không có quyền tạo phiếu xuất cho kho ${warehouse}.` };
+      }
+    }
+    
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     const sheet = ss.getSheetByName(SHEET_DL_XUAT);
     const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
@@ -976,4 +1260,132 @@ function refreshData() {
   const cache = CacheService.getScriptCache();
   cache.removeAll([SHEET_DMHH, SHEET_DL_NHAP, SHEET_DL_XUAT, SHEET_DMTK]);
   return { status: 'success', message: 'Đã làm mới dữ liệu.' };
+}
+
+// =================================================================
+// HÀM QUẢN LÝ NGƯỜI DÙNG (CHỈ ADMIN)
+// =================================================================
+
+function getAllUsers() {
+  try {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
+    // Kiểm tra quyền admin
+    if (!checkPermission('manage_users')) {
+      return { status: 'error', message: 'Bạn không có quyền truy cập chức năng này.' };
+    }
+    
+    const users = getSheetData(SHEET_USERS);
+    return { status: 'success', data: users };
+  } catch (e) {
+    Logger.log('Error getting all users: ' + e.toString());
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function updateUserRole(username, newRole, assignedWarehouses = '') {
+  try {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
+    // Kiểm tra quyền admin
+    if (!checkPermission('manage_users')) {
+      return { status: 'error', message: 'Bạn không có quyền thực hiện chức năng này.' };
+    }
+    
+    if (!Object.values(USER_ROLES).includes(newRole)) {
+      return { status: 'error', message: 'Role không hợp lệ.' };
+    }
+    
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_USERS);
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    const headers = values.shift();
+    
+    const userIndex = headers.indexOf('USER');
+    const roleIndex = headers.indexOf('ROLE');
+    const khoIndex = headers.indexOf('KHO');
+    
+    if (userIndex === -1 || roleIndex === -1) {
+      return { status: 'error', message: 'Cấu trúc sheet USERS không đúng.' };
+    }
+    
+    // Tìm và cập nhật người dùng
+    for (let i = 0; i < values.length; i++) {
+      if (values[i][userIndex] === username) {
+        values[i][roleIndex] = newRole;
+        if (khoIndex !== -1) {
+          values[i][khoIndex] = assignedWarehouses;
+        }
+        
+        // Cập nhật vào sheet
+        sheet.getRange(i + 2, roleIndex + 1).setValue(newRole);
+        if (khoIndex !== -1) {
+          sheet.getRange(i + 2, khoIndex + 1).setValue(assignedWarehouses);
+        }
+        
+        return { status: 'success', message: 'Cập nhật role thành công.' };
+      }
+    }
+    
+    return { status: 'error', message: 'Không tìm thấy người dùng.' };
+  } catch (e) {
+    Logger.log('Error updating user role: ' + e.toString());
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function getCurrentUserInfo() {
+  try {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
+    const user = getCurrentUser();
+    const warehouses = getUserWarehouses();
+    
+    return {
+      status: 'success',
+      data: {
+        user: user,
+        warehouses: warehouses,
+        canEditPrice: canEditPrice()
+      }
+    };
+  } catch (e) {
+    Logger.log('Error getting current user info: ' + e.toString());
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function getAllUsers() {
+  try {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
+    // Kiểm tra quyền admin
+    if (!checkPermission('manage_users')) {
+      return { status: 'error', message: 'Bạn không có quyền truy cập chức năng này.' };
+    }
+    
+    // Lấy dữ liệu users
+    const users = getSheetData(SHEET_USERS);
+    return { status: 'success', data: users };
+  } catch (e) {
+    Logger.log('Error getting all users: ' + e.toString());
+    return { status: 'error', message: e.toString() };
+  }
 }
