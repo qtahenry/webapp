@@ -6,171 +6,161 @@ const SHEET_DL_NHAP = "DL_NHAP";
 const SHEET_DL_XUAT = "DL_XUAT";
 const SHEET_DMTK = "DMTK";
 const SHEET_USERS = "USERS";
-const SHEET_USER_PERMISSIONS = "USER_PERMISSIONS";
 
 // Các role người dùng
 const USER_ROLES = {
   ADMIN: 'admin',
   ACCOUNTANT: 'accountant', 
-  WAREHO_KEEPER: 'warehouse_keeper'
-};
-
-// Các quyền
-const PERMISSIONS = {
-  CREATE_PRODUCT: 'create_product',
-  EDIT_PRODUCT: 'edit_product',
-  DELETE_PRODUCT: 'delete_product',
-  CREATE_IMPORT: 'create_import',
-  EDIT_IMPORT: 'edit_import',
-  DELETE_IMPORT: 'delete_import',
-  CREATE_EXPORT: 'create_export',
-  EDIT_EXPORT: 'edit_export',
-  DELETE_EXPORT: 'delete_export',
-  VIEW_INVENTORY: 'view_inventory',
-  EDIT_PRICE: 'edit_price',
-  MANAGE_USERS: 'manage_users'
+  WAREHOUSE_KEEPER: 'warehouse_keeper'
 };
 
 // =================================================================
-// HỆ THỐNG XÁC THỰC VÀ PHÂN QUYỀN
+// HỆ THỐNG ĐĂNG NHẬP VÀ PHÂN QUYỀN
 // =================================================================
 
-function getCurrentUser() {
+// Lưu trữ session người dùng
+let currentUserSession = null;
+
+function login(username, password) {
   try {
-    const user = Session.getActiveUser();
-    if (!user) return null;
-    
-    const userEmail = user.getEmail();
     const users = getSheetData(SHEET_USERS);
-    const currentUser = users.find(u => u.EMAIL === userEmail);
-    
-    if (!currentUser) {
-      // Tạo người dùng mới nếu chưa có
-      return createNewUser(userEmail);
-    }
-    
-    return currentUser;
-  } catch (e) {
-    Logger.log('Error getting current user: ' + e.toString());
-    return null;
-  }
-}
-
-function createNewUser(email) {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_USERS);
-    
-    // Tạo người dùng mới với role mặc định là warehouse_keeper
-    const newUser = {
-      EMAIL: email,
-      FULL_NAME: email.split('@')[0],
-      ROLE: USER_ROLES.WAREHOUSE_KEEPER,
-      STATUS: 'active',
-      CREATED_DATE: new Date(),
-      ASSIGNED_WAREHOUSES: ''
-    };
-    
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
-    const rowData = headers.map(header => newUser[header] !== undefined ? newUser[header] : "");
-    
-    sheet.getRange(sheet.getLastRow() + 1, 1, 1, headers.length).setValues([rowData]);
-    
-    // Tạo phân quyền mặc định
-    createDefaultUserPermissions(email);
-    
-    return newUser;
-  } catch (e) {
-    Logger.log('Error creating new user: ' + e.toString());
-    return null;
-  }
-}
-
-function createDefaultUserPermissions(email) {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_USER_PERMISSIONS);
-    
-    const defaultPermissions = {
-      USER_EMAIL: email,
-      PERMISSION: PERMISSIONS.VIEW_INVENTORY,
-      WAREHOUSE_CODE: '*', // Tất cả kho
-      GRANTED: true
-    };
-    
-    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
-    const rowData = headers.map(header => defaultPermissions[header] !== undefined ? defaultPermissions[header] : "");
-    
-    sheet.getRange(sheet.getLastRow() + 1, 1, 1, headers.length).setValues([rowData]);
-  } catch (e) {
-    Logger.log('Error creating default permissions: ' + e.toString());
-  }
-}
-
-function getUserPermissions(userEmail) {
-  try {
-    const permissions = getSheetData(SHEET_USER_PERMISSIONS);
-    return permissions.filter(p => p.USER_EMAIL === userEmail);
-  } catch (e) {
-    Logger.log('Error getting user permissions: ' + e.toString());
-    return [];
-  }
-}
-
-function checkPermission(userEmail, permission, warehouseCode = null) {
-  try {
-    const user = getSheetData(SHEET_USERS).find(u => u.EMAIL === userEmail);
-    if (!user) return false;
-    
-    // Admin có tất cả quyền
-    if (user.ROLE === USER_ROLES.ADMIN) return true;
-    
-    const userPermissions = getUserPermissions(userEmail);
-    const hasPermission = userPermissions.some(p => 
-      p.PERMISSION === permission && 
-      p.GRANTED === true &&
-      (p.WAREHOUSE_CODE === '*' || p.WAREHOUSE_CODE === warehouseCode || !warehouseCode)
+    const user = users.find(u => 
+      u.USER === username && 
+      u.PASS === password && 
+      u.STATUS === 'active'
     );
     
-    return hasPermission;
+    if (!user) {
+      return { status: 'error', message: 'Tên đăng nhập hoặc mật khẩu không đúng, hoặc tài khoản đã bị khóa.' };
+    }
+    
+    // Tạo session
+    currentUserSession = {
+      username: user.USER,
+      role: user.ROLE,
+      kho: user.KHO,
+      loginTime: new Date()
+    };
+    
+    return { 
+      status: 'success', 
+      message: 'Đăng nhập thành công!',
+      user: {
+        username: user.USER,
+        role: user.ROLE,
+        kho: user.KHO
+      }
+    };
   } catch (e) {
-    Logger.log('Error checking permission: ' + e.toString());
-    return false;
+    Logger.log('Error during login: ' + e.toString());
+    return { status: 'error', message: 'Lỗi hệ thống: ' + e.toString() };
   }
 }
 
-function getUserWarehouses(userEmail) {
+function logout() {
   try {
-    const user = getSheetData(SHEET_USERS).find(u => u.EMAIL === userEmail);
-    if (!user) return [];
-    
-    if (user.ROLE === USER_ROLES.ADMIN) {
-      // Admin có thể xem tất cả kho
-      const products = getSheetData(SHEET_DMHH);
-      return [...new Set(products.map(p => p.MA_KHO).filter(Boolean))];
-    }
-    
-    if (user.ASSIGNED_WAREHOUSES) {
-      return user.ASSIGNED_WAREHOUSES.split(',').map(w => w.trim()).filter(Boolean);
-    }
-    
-    return [];
+    currentUserSession = null;
+    return { status: 'success', message: 'Đăng xuất thành công!' };
   } catch (e) {
-    Logger.log('Error getting user warehouses: ' + e.toString());
-    return [];
+    Logger.log('Error during logout: ' + e.toString());
+    return { status: 'error', message: 'Lỗi hệ thống: ' + e.toString() };
   }
 }
 
-function canEditPrice(userEmail) {
-  try {
-    const user = getSheetData(SHEET_USERS).find(u => u.EMAIL === userEmail);
-    if (!user) return false;
-    
-    return user.ROLE === USER_ROLES.ADMIN || user.ROLE === USER_ROLES.ACCOUNTANT;
-  } catch (e) {
-    Logger.log('Error checking price edit permission: ' + e.toString());
-    return false;
+function getCurrentUser() {
+  return currentUserSession;
+}
+
+function checkSession() {
+  return currentUserSession !== null;
+}
+
+function requireLogin() {
+  if (!checkSession()) {
+    return { status: 'error', message: 'Vui lòng đăng nhập để sử dụng hệ thống.' };
   }
+  return { status: 'success' };
+}
+
+function checkPermission(permission, warehouseCode = null) {
+  if (!checkSession()) return false;
+  
+  const user = currentUserSession;
+  
+  // Admin có tất cả quyền
+  if (user.role === USER_ROLES.ADMIN) return true;
+  
+  // Kế toán có quyền của thủ kho + quyền điền giá
+  if (user.role === USER_ROLES.ACCOUNTANT) {
+    if (permission === 'edit_price') return true;
+    return true; // Có tất cả quyền khác
+  }
+  
+  // Thủ kho có quyền hạn chế
+  if (user.role === USER_ROLES.WAREHOUSE_KEEPER) {
+    // Kiểm tra quyền truy cập kho
+    if (warehouseCode && user.kho !== '*' && !user.kho.includes(warehouseCode)) {
+      return false;
+    }
+    
+    // Thủ kho không được điền giá
+    if (permission === 'edit_price') return false;
+    
+    return true;
+  }
+  
+  return false;
+}
+
+function canEditPrice() {
+  if (!checkSession()) return false;
+  return currentUserSession.role === USER_ROLES.ADMIN || currentUserSession.role === USER_ROLES.ACCOUNTANT;
+}
+
+function getUserWarehouses() {
+  if (!checkSession()) return [];
+  
+  const user = currentUserSession;
+  
+  if (user.role === USER_ROLES.ADMIN || user.role === USER_ROLES.ACCOUNTANT) {
+    // Admin và kế toán có thể xem tất cả kho
+    const products = getSheetData(SHEET_DMHH);
+    return [...new Set(products.map(p => p.MA_KHO).filter(Boolean))];
+  }
+  
+  if (user.kho === '*') {
+    // Thủ kho được phân công tất cả kho
+    const products = getSheetData(SHEET_DMHH);
+    return [...new Set(products.map(p => p.MA_KHO).filter(Boolean))];
+  }
+  
+  // Thủ kho chỉ được phân công một số kho cụ thể
+  return user.kho ? user.kho.split(',').map(w => w.trim()).filter(Boolean) : [];
+}
+
+function canEditDocument(documentType, documentData) {
+  if (!checkSession()) return false;
+  
+  const user = currentUserSession;
+  
+  // Admin có thể sửa/xóa bất kỳ lúc nào
+  if (user.role === USER_ROLES.ADMIN) return true;
+  
+  // Kế toán có thể sửa/xóa bất kỳ lúc nào
+  if (user.role === USER_ROLES.ACCOUNTANT) return true;
+  
+  // Thủ kho chỉ được sửa/xóa khi chứng từ chưa có giá
+  if (user.role === USER_ROLES.WAREHOUSE_KEEPER) {
+    // Kiểm tra xem chứng từ có giá hay không
+    const hasPrice = documentData.some(item => {
+      const price = parseFloat(item.DON_GIA) || 0;
+      return price > 0;
+    });
+    
+    return !hasPrice; // Chỉ được sửa/xóa khi chưa có giá
+  }
+  
+  return false;
 }
 
 // =================================================================
@@ -179,15 +169,7 @@ function canEditPrice(userEmail) {
 
 
 function doGet() {
-  const currentUser = getCurrentUser();
   const template = HtmlService.createTemplateFromFile('index');
-  
-  if (currentUser) {
-    template.currentUser = currentUser;
-    template.userPermissions = getUserPermissions(currentUser.EMAIL);
-    template.userWarehouses = getUserWarehouses(currentUser.EMAIL);
-  }
-  
   return template
     .evaluate()
     .setTitle('WebApp Quản lý Kho')
@@ -242,13 +224,14 @@ function getPartners() {
 
 function addProduct(productData) {
   try {
-    // Kiểm tra quyền tạo sản phẩm
-    const currentUser = getCurrentUser();
-    if (!currentUser) {
-      return { status: 'error', message: 'Không thể xác định người dùng hiện tại.' };
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
     }
     
-    if (!checkPermission(currentUser.EMAIL, PERMISSIONS.CREATE_PRODUCT, productData.MA_KHO)) {
+    // Kiểm tra quyền tạo sản phẩm
+    if (!checkPermission('create_product', productData.MA_KHO)) {
       return { status: 'error', message: 'Bạn không có quyền tạo sản phẩm cho kho này.' };
     }
     
@@ -304,10 +287,10 @@ function addProduct(productData) {
 
 function addMultiProductImport(payload) {
   try {
-    // Kiểm tra quyền tạo phiếu nhập
-    const currentUser = getCurrentUser();
-    if (!currentUser) {
-      return { status: 'error', message: 'Không thể xác định người dùng hiện tại.' };
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
     }
     
     const { generalInfo, productDetails } = payload;
@@ -315,7 +298,7 @@ function addMultiProductImport(payload) {
     // Kiểm tra quyền cho từng kho trong phiếu nhập
     const warehousesInImport = [...new Set(productDetails.map(p => p.MA_KHO))];
     for (const warehouse of warehousesInImport) {
-      if (!checkPermission(currentUser.EMAIL, PERMISSIONS.CREATE_IMPORT, warehouse)) {
+      if (!checkPermission('create_import', warehouse)) {
         return { status: 'error', message: `Bạn không có quyền tạo phiếu nhập cho kho ${warehouse}.` };
       }
     }
@@ -401,10 +384,10 @@ function addMultiProductImport(payload) {
 
 function addMultiProductExport(payload) {
   try {
-    // Kiểm tra quyền tạo phiếu xuất
-    const currentUser = getCurrentUser();
-    if (!currentUser) {
-      return { status: 'error', message: 'Không thể xác định người dùng hiện tại.' };
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
     }
     
     const { generalInfo, productDetails } = payload;
@@ -412,7 +395,7 @@ function addMultiProductExport(payload) {
     // Kiểm tra quyền cho từng kho trong phiếu xuất
     const warehousesInExport = [...new Set(productDetails.map(p => p.MA_KHO))];
     for (const warehouse of warehousesInExport) {
-      if (!checkPermission(currentUser.EMAIL, PERMISSIONS.CREATE_EXPORT, warehouse)) {
+      if (!checkPermission('create_export', warehouse)) {
         return { status: 'error', message: `Bạn không có quyền tạo phiếu xuất cho kho ${warehouse}.` };
       }
     }
@@ -1200,8 +1183,14 @@ function refreshData() {
 
 function getAllUsers() {
   try {
-    const currentUser = getCurrentUser();
-    if (!currentUser || currentUser.ROLE !== USER_ROLES.ADMIN) {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
+    // Kiểm tra quyền admin
+    if (!checkPermission('manage_users')) {
       return { status: 'error', message: 'Bạn không có quyền truy cập chức năng này.' };
     }
     
@@ -1213,10 +1202,16 @@ function getAllUsers() {
   }
 }
 
-function updateUserRole(userEmail, newRole, assignedWarehouses = '') {
+function updateUserRole(username, newRole, assignedWarehouses = '') {
   try {
-    const currentUser = getCurrentUser();
-    if (!currentUser || currentUser.ROLE !== USER_ROLES.ADMIN) {
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
+    }
+    
+    // Kiểm tra quyền admin
+    if (!checkPermission('manage_users')) {
       return { status: 'error', message: 'Bạn không có quyền thực hiện chức năng này.' };
     }
     
@@ -1230,30 +1225,27 @@ function updateUserRole(userEmail, newRole, assignedWarehouses = '') {
     const values = range.getValues();
     const headers = values.shift();
     
-    const emailIndex = headers.indexOf('EMAIL');
+    const userIndex = headers.indexOf('USER');
     const roleIndex = headers.indexOf('ROLE');
-    const warehouseIndex = headers.indexOf('ASSIGNED_WAREHOUSES');
+    const khoIndex = headers.indexOf('KHO');
     
-    if (emailIndex === -1 || roleIndex === -1) {
+    if (userIndex === -1 || roleIndex === -1) {
       return { status: 'error', message: 'Cấu trúc sheet USERS không đúng.' };
     }
     
     // Tìm và cập nhật người dùng
     for (let i = 0; i < values.length; i++) {
-      if (values[i][emailIndex] === userEmail) {
+      if (values[i][userIndex] === username) {
         values[i][roleIndex] = newRole;
-        if (warehouseIndex !== -1) {
-          values[i][warehouseIndex] = assignedWarehouses;
+        if (khoIndex !== -1) {
+          values[i][khoIndex] = assignedWarehouses;
         }
         
         // Cập nhật vào sheet
         sheet.getRange(i + 2, roleIndex + 1).setValue(newRole);
-        if (warehouseIndex !== -1) {
-          sheet.getRange(i + 2, warehouseIndex + 1).setValue(assignedWarehouses);
+        if (khoIndex !== -1) {
+          sheet.getRange(i + 2, khoIndex + 1).setValue(assignedWarehouses);
         }
-        
-        // Cập nhật phân quyền mặc định
-        updateUserDefaultPermissions(userEmail, newRole);
         
         return { status: 'success', message: 'Cập nhật role thành công.' };
       }
@@ -1266,101 +1258,23 @@ function updateUserRole(userEmail, newRole, assignedWarehouses = '') {
   }
 }
 
-function updateUserDefaultPermissions(userEmail, newRole) {
-  try {
-    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = ss.getSheetByName(SHEET_USER_PERMISSIONS);
-    
-    // Xóa tất cả phân quyền cũ
-    const range = sheet.getDataRange();
-    const values = range.getValues();
-    const headers = values.shift();
-    
-    const emailIndex = headers.indexOf('USER_EMAIL');
-    const permissionIndex = headers.indexOf('PERMISSION');
-    
-    // Xóa từ dưới lên để tránh lỗi index
-    for (let i = values.length - 1; i >= 0; i--) {
-      if (values[i][emailIndex] === userEmail) {
-        sheet.deleteRow(i + 2);
-      }
-    }
-    
-    // Tạo phân quyền mới theo role
-    const newPermissions = getDefaultPermissionsByRole(newRole);
-    newPermissions.forEach(permission => {
-      const rowData = headers.map(header => permission[header] !== undefined ? permission[header] : "");
-      sheet.getRange(sheet.getLastRow() + 1, 1, 1, headers.length).setValues([rowData]);
-    });
-  } catch (e) {
-    Logger.log('Error updating user default permissions: ' + e.toString());
-  }
-}
-
-function getDefaultPermissionsByRole(role) {
-  const basePermissions = [
-    { USER_EMAIL: '', PERMISSION: PERMISSIONS.VIEW_INVENTORY, WAREHOUSE_CODE: '*', GRANTED: true }
-  ];
-  
-  switch (role) {
-    case USER_ROLES.ADMIN:
-      return [
-        ...basePermissions,
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_PRODUCT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.EDIT_PRODUCT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.DELETE_PRODUCT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_IMPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.EDIT_IMPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.DELETE_IMPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_EXPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.EDIT_EXPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.DELETE_EXPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.EDIT_PRICE, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.MANAGE_USERS, WAREHOUSE_CODE: '*', GRANTED: true }
-      ];
-      
-    case USER_ROLES.ACCOUNTANT:
-      return [
-        ...basePermissions,
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_PRODUCT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.EDIT_PRODUCT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_IMPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.EDIT_IMPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_EXPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.EDIT_EXPORT, WAREHOUSE_CODE: '*', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.EDIT_PRICE, WAREHOUSE_CODE: '*', GRANTED: true }
-      ];
-      
-    case USER_ROLES.WAREHOUSE_KEEPER:
-      return [
-        ...basePermissions,
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_PRODUCT, WAREHOUSE_CODE: '', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_IMPORT, WAREHOUSE_CODE: '', GRANTED: true },
-        { USER_EMAIL: '', PERMISSION: PERMISSIONS.CREATE_EXPORT, WAREHOUSE_CODE: '', GRANTED: true }
-      ];
-      
-    default:
-      return basePermissions;
-  }
-}
-
 function getCurrentUserInfo() {
   try {
-    const currentUser = getCurrentUser();
-    if (!currentUser) {
-      return { status: 'error', message: 'Không thể xác định người dùng hiện tại.' };
+    // Kiểm tra đăng nhập
+    const loginCheck = requireLogin();
+    if (loginCheck.status === 'error') {
+      return loginCheck;
     }
     
-    const permissions = getUserPermissions(currentUser.EMAIL);
-    const warehouses = getUserWarehouses(currentUser.EMAIL);
+    const user = getCurrentUser();
+    const warehouses = getUserWarehouses();
     
     return {
       status: 'success',
       data: {
-        user: currentUser,
-        permissions: permissions,
+        user: user,
         warehouses: warehouses,
-        canEditPrice: canEditPrice(currentUser.EMAIL)
+        canEditPrice: canEditPrice()
       }
     };
   } catch (e) {

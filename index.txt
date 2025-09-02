@@ -68,8 +68,44 @@
 </head>
 <body class="flex h-screen text-gray-800">
 
+    <!-- Form Đăng Nhập -->
+    <div id="login-container" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl p-8 w-full max-w-md">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold text-gray-800">Đăng Nhập</h1>
+                <p class="text-gray-600 mt-2">Hệ thống Quản lý Kho</p>
+            </div>
+            
+            <form id="login-form" class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Tên đăng nhập</label>
+                    <input type="text" id="login-username" name="username" required 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                           placeholder="Nhập tên đăng nhập">
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Mật khẩu</label>
+                    <input type="password" id="login-password" name="password" required 
+                           class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                           placeholder="Nhập mật khẩu">
+                </div>
+                
+                <div id="login-error" class="hidden text-red-600 text-sm text-center"></div>
+                
+                <button type="submit" id="login-btn" 
+                        class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                    <span id="login-btn-text">Đăng nhập</span>
+                    <div id="login-btn-loader" class="hidden">
+                        <div class="loader w-5 h-5 border-2 border-white border-t-transparent rounded-full mx-auto"></div>
+                    </div>
+                </button>
+            </form>
+        </div>
+    </div>
+
     <!-- Sidebar -->
-    <aside class="w-64 bg-white shadow-md flex flex-col flex-shrink-0">
+    <aside id="sidebar" class="w-64 bg-white shadow-md flex flex-col flex-shrink-0 hidden">
         <div class="p-6 text-xl font-bold border-b">Nhập Xuất Tồn</div>
 
         <nav id="sidebar-nav" class="flex-1 mt-4">
@@ -83,12 +119,13 @@
             </ul>
         </nav>
         <div class="p-6 border-t">
-            <a href="#" class="text-blue-600 font-semibold">Quách Thế Anh</a>
+            <div class="text-sm text-gray-600">Đăng nhập bởi:</div>
+            <div id="logged-in-user" class="text-blue-600 font-semibold">...</div>
         </div>
     </aside>
 
     <!-- Main Content -->
-    <div class="flex-1 flex flex-col overflow-hidden">
+    <div id="main-content" class="flex-1 flex flex-col overflow-hidden hidden">
         <header class="bg-white p-6 flex justify-between items-center border-b">
             <div class="flex items-center space-x-4">
                 <button class="text-gray-600"><i class="ph-bold ph-list text-2xl"></i></button>
@@ -107,7 +144,7 @@
                         </button>
                         <div id="user-menu" class="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50 hidden">
                             <div class="px-4 py-2 text-sm text-gray-500 border-b">
-                                <div id="user-email">...</div>
+                                <div id="user-username">...</div>
                                 <div id="user-role">...</div>
                             </div>
                             <button id="logout-btn" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
@@ -934,7 +971,6 @@
         
         // Thông tin người dùng và phân quyền
         let currentUser = null;
-        let userPermissions = [];
         let userWarehouses = [];
 
         // =================================================================
@@ -973,31 +1009,48 @@
         $('#confirm-cancel-btn').on('click', () => closeModal('#confirmationModal'));
 
         // =================================================================
-        // HỆ THỐNG PHÂN QUYỀN
+        // HỆ THỐNG ĐĂNG NHẬP VÀ PHÂN QUYỀN
         // =================================================================
         
-        function initializeUserSystem() {
-            // Lấy thông tin người dùng từ server
+        function initializeLoginSystem() {
+            // Kiểm tra xem đã đăng nhập chưa
+            checkLoginStatus();
+        }
+        
+        function checkLoginStatus() {
+            // Lấy thông tin người dùng hiện tại
             google.script.run.withSuccessHandler(function(response) {
                 if (response.status === 'success') {
+                    // Đã đăng nhập, hiển thị giao diện chính
                     currentUser = response.data.user;
-                    userPermissions = response.data.permissions;
                     userWarehouses = response.data.warehouses;
-                    
-                    // Cập nhật giao diện theo quyền
+                    showMainInterface();
                     updateUIByPermissions();
                     updateUserInfoDisplay();
                 } else {
-                    console.error('Không thể lấy thông tin người dùng:', response.message);
+                    // Chưa đăng nhập, hiển thị form đăng nhập
+                    showLoginForm();
                 }
             }).getCurrentUserInfo();
+        }
+        
+        function showLoginForm() {
+            $('#login-container').show();
+            $('#sidebar').hide();
+            $('#main-content').hide();
+        }
+        
+        function showMainInterface() {
+            $('#login-container').hide();
+            $('#sidebar').show();
+            $('#main-content').show();
         }
         
         function updateUIByPermissions() {
             if (!currentUser) return;
             
             // Hiển thị/ẩn tab cài đặt theo quyền
-            if (currentUser.ROLE === 'admin') {
+            if (currentUser.role === 'admin') {
                 $('#settings-menu-item').show();
             } else {
                 $('#settings-menu-item').hide();
@@ -1011,7 +1064,7 @@
         }
         
         function updatePriceEditPermissions() {
-            const canEditPrice = currentUser && (currentUser.ROLE === 'admin' || currentUser.ROLE === 'accountant');
+            const canEditPrice = currentUser && (currentUser.role === 'admin' || currentUser.role === 'accountant');
             
             // Ẩn/hiện các trường giá trong form sản phẩm
             $('input[name="GIA_NHAP"], input[name="GIA_BAN"]').prop('readonly', !canEditPrice);
@@ -1031,7 +1084,7 @@
         }
         
         function updateWarehousePermissions() {
-            if (!currentUser || currentUser.ROLE === 'admin') return;
+            if (!currentUser || currentUser.role === 'admin') return;
             
             // Lọc kho theo quyền của người dùng
             if (userWarehouses.length > 0) {
@@ -1049,9 +1102,9 @@
                 $('#import-kho-filter option, #export-kho-filter option').each(function() {
                     const khoValue = $(this).val();
                     if (khoValue && !userWarehouses.includes(khoValue)) {
-                        $(this).hide();
-                    } else {
                         $(this).show();
+                    } else {
+                        $(this).hide();
                     }
                 });
             }
@@ -1061,15 +1114,18 @@
             if (!currentUser) return;
             
             // Cập nhật thông tin người dùng trong header
-            $('#user-name').text(currentUser.FULL_NAME || currentUser.EMAIL.split('@')[0]);
-            $('#user-email').text(currentUser.EMAIL);
-            $('#user-role').text(getRoleDisplayName(currentUser.ROLE));
+            $('#user-name').text(currentUser.username);
+            $('#user-username').text(currentUser.username);
+            $('#user-role').text(getRoleDisplayName(currentUser.role));
+            
+            // Cập nhật thông tin trong sidebar
+            $('#logged-in-user').text(currentUser.username);
             
             // Cập nhật thông tin trong tab cài đặt
-            $('#current-user-email').text(currentUser.EMAIL);
-            $('#current-user-role').text(getRoleDisplayName(currentUser.ROLE));
-            $('#current-user-warehouses').text(currentUser.ASSIGNED_WAREHOUSES || 'Tất cả kho');
-            $('#current-user-price-edit').text(currentUser.ROLE === 'admin' || currentUser.ROLE === 'accountant' ? 'Có' : 'Không');
+            $('#current-user-email').text(currentUser.username);
+            $('#current-user-role').text(getRoleDisplayName(currentUser.role));
+            $('#current-user-warehouses').text(currentUser.kho || 'Tất cả kho');
+            $('#current-user-price-edit').text(currentUser.role === 'admin' || currentUser.role === 'accountant' ? 'Có' : 'Không');
         }
         
         function getRoleDisplayName(role) {
@@ -1119,11 +1175,8 @@
 
         $('#sidebar-nav').on('click', 'a', function(e) { e.preventDefault(); switchTab($(this).attr('href').substring(1)); });
         
-        // Tải dữ liệu Dashboard lần đầu
-        switchTab('dashboard');
-        
-        // Khởi tạo hệ thống người dùng
-        initializeUserSystem();
+        // Khởi tạo hệ thống đăng nhập
+        initializeLoginSystem();
 
         function loadDataForTab(tabId, callback) {
             let loadingRow = $(`#${tabId}-loading-row, #loading-row`);
@@ -2894,6 +2947,71 @@
         });
         
         // =================================================================
+        // XỬ LÝ ĐĂNG NHẬP
+        // =================================================================
+        
+        $('#login-form').on('submit', function(e) {
+            e.preventDefault();
+            
+            const username = $('#login-username').val().trim();
+            const password = $('#login-password').val();
+            
+            if (!username || !password) {
+                showLoginError('Vui lòng nhập đầy đủ thông tin đăng nhập.');
+                return;
+            }
+            
+            // Hiển thị loading
+            $('#login-btn-text').hide();
+            $('#login-btn-loader').show();
+            $('#login-btn').prop('disabled', true);
+            hideLoginError();
+            
+            // Gọi API đăng nhập
+            google.script.run.withSuccessHandler(function(response) {
+                if (response.status === 'success') {
+                    // Đăng nhập thành công
+                    currentUser = response.data.user;
+                    userWarehouses = [];
+                    
+                    // Lấy thông tin kho
+                    google.script.run.withSuccessHandler(function(warehouseResponse) {
+                        if (warehouseResponse.status === 'success') {
+                            userWarehouses = warehouseResponse.data.warehouses;
+                        }
+                        
+                        // Hiển thị giao diện chính
+                        showMainInterface();
+                        updateUIByPermissions();
+                        updateUserInfoDisplay();
+                        
+                        // Tải dữ liệu Dashboard
+                        switchTab('dashboard');
+                        
+                    }).getCurrentUserInfo();
+                    
+                } else {
+                    // Đăng nhập thất bại
+                    showLoginError(response.message);
+                }
+                
+                // Ẩn loading
+                $('#login-btn-text').show();
+                $('#login-btn-loader').hide();
+                $('#login-btn').prop('disabled', false);
+                
+            }).login(username, password);
+        });
+        
+        function showLoginError(message) {
+            $('#login-error').text(message).removeClass('hidden');
+        }
+        
+        function hideLoginError() {
+            $('#login-error').addClass('hidden');
+        }
+        
+        // =================================================================
         // XỬ LÝ TAB CÀI ĐẶT
         // =================================================================
         
@@ -2923,21 +3041,21 @@
             users.forEach(user => {
                 const row = `
                     <tr class="border-b hover:bg-gray-50">
-                        <td class="p-3">${user.EMAIL}</td>
-                        <td class="p-3">${user.FULL_NAME || '-'}</td>
+                        <td class="p-3">${user.USER}</td>
+                        <td class="p-3">${user.USER}</td>
                         <td class="p-3">
                             <span class="px-2 py-1 text-xs rounded-full ${getRoleBadgeClass(user.ROLE)}">
                                 ${getRoleDisplayName(user.ROLE)}
                             </span>
                         </td>
-                        <td class="p-3">${user.ASSIGNED_WAREHOUSES || 'Tất cả kho'}</td>
+                        <td class="p-3">${user.KHO || 'Tất cả kho'}</td>
                         <td class="p-3">
                             <span class="px-2 py-1 text-xs rounded-full ${user.STATUS === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
                                 ${user.STATUS === 'active' ? 'Hoạt động' : 'Không hoạt động'}
                             </span>
                         </td>
                         <td class="p-3">
-                            <button class="edit-user-btn text-blue-600 hover:text-blue-800 text-sm" data-email="${user.EMAIL}">
+                            <button class="edit-user-btn text-blue-600 hover:text-blue-800 text-sm" data-username="${user.USER}">
                                 <i class="ph-bold ph-pencil-simple mr-1"></i>Sửa
                             </button>
                         </td>
@@ -3039,22 +3157,34 @@
         
         // Xử lý đăng xuất
         $('#logout-btn').on('click', function() {
-            // Reload trang để đăng xuất
-            location.reload();
+            google.script.run.withSuccessHandler(function(response) {
+                if (response.status === 'success') {
+                    // Đăng xuất thành công, quay về form đăng nhập
+                    currentUser = null;
+                    userWarehouses = [];
+                    showLoginForm();
+                    
+                    // Reset form đăng nhập
+                    $('#login-form')[0].reset();
+                    hideLoginError();
+                } else {
+                    showToast('Lỗi đăng xuất: ' + response.message);
+                }
+            }).logout();
         });
         
         // Xử lý sửa người dùng
         $(document).on('click', '.edit-user-btn', function() {
-            const userEmail = $(this).data('email');
+            const username = $(this).data('username');
             
             // Tìm thông tin người dùng
             google.script.run.withSuccessHandler(function(response) {
                 if (response.status === 'success') {
-                    const user = response.data.find(u => u.EMAIL === userEmail);
+                    const user = response.data.find(u => u.USER === username);
                     if (user) {
-                        $('#user-select').val(user.EMAIL);
+                        $('#user-select').val(user.USER);
                         $('#role-select').val(user.ROLE);
-                        $('#assigned-warehouses').val(user.ASSIGNED_WAREHOUSES || '');
+                        $('#assigned-warehouses').val(user.KHO || '');
                         
                         if (user.ROLE === 'warehouse_keeper') {
                             $('#warehouse-assignment').show();
