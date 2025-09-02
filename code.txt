@@ -1,0 +1,979 @@
+// ID của Google Sheet
+const SPREADSHEET_ID = '1fgpViAyfFW1KISCiejBOhfSAOA4xJs6EMgybwfX-3ik';
+// Tên các sheet
+const SHEET_DMHH = "DMHH";
+const SHEET_DL_NHAP = "DL_NHAP";
+const SHEET_DL_XUAT = "DL_XUAT";
+const SHEET_DMTK = "DMTK";
+
+// =================================================================
+// CÁC HÀM CƠ BẢN CỦA WEBAPP
+// =================================================================
+
+
+function doGet() {
+  return HtmlService.createTemplateFromFile('index')
+    .evaluate()
+    .setTitle('WebApp Quản lý Kho')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+// =================================================================
+// HÀM LẤY DỮ LIỆU (CÓ DÙNG CACHE)
+// =================================================================
+
+function getSheetData(sheetName) {
+  const cache = CacheService.getScriptCache();
+  const cachedData = cache.get(sheetName);
+
+  if (cachedData != null) {
+    return JSON.parse(cachedData);
+  }
+
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  const sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return [];
+  
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  if (values.length < 2) return [];
+
+  const headers = values.shift().map(header => header.toString().trim());
+  const data = values.map(row => {
+    let obj = {};
+    headers.forEach((header, index) => {
+      if (row[index] instanceof Date) {
+        obj[header] = Utilities.formatDate(row[index], Session.getScriptTimeZone(), "dd/MM/yyyy");
+      } else {
+        obj[header] = row[index];
+      }
+    });
+    return obj;
+  });
+  
+  cache.put(sheetName, JSON.stringify(data), 900); // Cache trong 15 phút
+  return data;
+}
+
+function getPartners() {
+  return getSheetData(SHEET_DMTK);
+}
+
+// =================================================================
+// HÀM GHI DỮ LIỆU
+// =================================================================
+
+function addProduct(productData) {
+  try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_DMHH);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
+    
+    let productsToCreate = [];
+    const productType = productData.product_type;
+
+    if (productType === 'simple') {
+        const newProduct = { ...productData };
+        newProduct.MA_SKU = productData.MA_HANG;
+        productsToCreate.push(newProduct);
+    } else if (productType === 'variant') {
+        const variants = JSON.parse(productData.variants || '[]');
+        if (variants.length === 0) {
+            throw new Error('Không có chi tiết phân loại nào để tạo.');
+        }
+
+        variants.forEach(variant => {
+            const newVariant = { ...productData }; 
+            const mauSac = (newVariant.MAU_SAC || '').toUpperCase().trim();
+            const kichCo = String(variant.kich_co || '').toUpperCase().trim();
+            
+            newVariant.MA_SKU = `${newVariant.MA_HANG}${mauSac ? '-' + mauSac : ''}${kichCo ? '-' + kichCo : ''}`;
+            newVariant.KICH_CO = variant.kich_co;
+            newVariant.SL_DK = variant.sl_dk;
+            newVariant.KE_HOACH = variant.ke_hoach;
+            newVariant.DA_NHAP = variant.da_nhap;
+            newVariant.DA_XUAT = variant.da_xuat;
+            productsToCreate.push(newVariant);
+        });
+    }
+
+    const rowsToAppend = productsToCreate.map(product => {
+        return headers.map(header => product[header] || "");
+    });
+
+    if (rowsToAppend.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, headers.length)
+           .setValues(rowsToAppend);
+    }
+    
+    CacheService.getScriptCache().remove(SHEET_DMHH);
+    
+    return { status: 'success', message: `Thêm thành công ${productsToCreate.length} sản phẩm/phân loại!`, data: productsToCreate };
+  } catch (e) {
+    Logger.log(e);
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function addMultiProductImport(payload) {
+  try {
+    const { generalInfo, productDetails } = payload;
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_DL_NHAP);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
+
+    const partners = getSheetData(SHEET_DMTK);
+    const partnerMap = partners.reduce((map, partner) => {
+      if (partner.MA_TK) map[partner.MA_TK] = partner;
+      return map;
+    }, {});
+
+    let finalSoCt;
+
+    if (generalInfo.SO_PHIEU_NHAP_TAY && generalInfo.SO_PHIEU_NHAP_TAY.trim() !== '') {
+      finalSoCt = generalInfo.SO_PHIEU_NHAP_TAY.trim();
+    } else {
+      const prefix = "NK" + Utilities.formatDate(new Date(), "GMT+7", "yyMM");
+      const soCtColumn = headers.indexOf('SO_CT') + 1;
+      const lastRow = sheet.getLastRow();
+      let newSoCtNumber = 1;
+      if (lastRow > 1) {
+          const allSoCt = sheet.getRange(2, soCtColumn, lastRow -1, 1).getValues().flat();
+          const relevantSoCt = allSoCt.filter(s => s.startsWith(prefix));
+          if(relevantSoCt.length > 0) {
+            const lastNumber = Math.max(...relevantSoCt.map(s => parseInt(s.split('-')[1]) || 0));
+            newSoCtNumber = lastNumber + 1;
+          }
+      }
+      finalSoCt = prefix + '-' + ('000' + newSoCtNumber).slice(-4);
+    }
+
+    const newlyAddedRows = []; 
+    
+    const rowsToAppend = productDetails.map(product => {
+      const rowData = { ...generalInfo, ...product };
+      rowData.SO_CT = finalSoCt;
+      
+      rowData.THANH_TIEN = (parseFloat(rowData.SO_LUONG) || 0) * (parseFloat(rowData.DON_GIA) || 0);
+      rowData.TIEN_THUE = rowData.THANH_TIEN * (parseFloat(rowData.THUE_SUAT) / 100 || 0);
+      
+      const returnData = { ...rowData };
+      
+      if (rowData.NGAY_CT && typeof rowData.NGAY_CT === 'string') {
+        const dateObj = new Date(rowData.NGAY_CT);
+        rowData.NGAY_CT = dateObj; 
+        returnData.NGAY_CT = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), "dd/MM/yyyy");
+      }
+      if (rowData.NGAY_HD && typeof rowData.NGAY_HD === 'string' && rowData.NGAY_HD) {
+        const dateObj = new Date(rowData.NGAY_HD);
+        rowData.NGAY_HD = dateObj;
+        returnData.NGAY_HD = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), "dd/MM/yyyy");
+      } else {
+        delete rowData.NGAY_HD;
+      }
+      
+      const partnerCode = returnData.TK_CO;
+      returnData.supplierInfo = (partnerCode && partnerMap[partnerCode]) ? partnerMap[partnerCode] : null;
+      newlyAddedRows.push(returnData);
+
+      return headers.map(header => rowData[header] !== undefined ? rowData[header] : "");
+    });
+
+    if (rowsToAppend.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, headers.length)
+           .setValues(rowsToAppend);
+    }
+    
+    refreshData();
+    return { 
+      status: 'success', 
+      message: 'Nhập kho thành công với số CT: ' + finalSoCt,
+      data: newlyAddedRows
+    };
+
+  } catch (e) {
+    Logger.log(e);
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function addMultiProductExport(payload) {
+  try {
+    const { generalInfo, productDetails } = payload;
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_DL_XUAT);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
+    
+    const partners = getSheetData(SHEET_DMTK);
+    const partnerMap = partners.reduce((map, partner) => {
+      if (partner.MA_TK) map[partner.MA_TK] = partner;
+      return map;
+    }, {});
+
+    let finalSoCt;
+
+    if (generalInfo.SO_PHIEU_XUAT_TAY && generalInfo.SO_PHIEU_XUAT_TAY.trim() !== '') {
+      finalSoCt = generalInfo.SO_PHIEU_XUAT_TAY.trim();
+    } else {
+       const prefix = "XK" + Utilities.formatDate(new Date(), "GMT+7", "yyMM");
+      const soCtColumn = headers.indexOf('SO_CT') + 1;
+      const lastRow = sheet.getLastRow();
+      let newSoCtNumber = 1;
+      if (lastRow > 1) {
+          const allSoCt = sheet.getRange(2, soCtColumn, lastRow -1, 1).getValues().flat();
+          const relevantSoCt = allSoCt.filter(s => s.startsWith(prefix));
+          if(relevantSoCt.length > 0) {
+            const lastNumber = Math.max(...relevantSoCt.map(s => parseInt(s.split('-')[1]) || 0));
+            newSoCtNumber = lastNumber + 1;
+          }
+      }
+      finalSoCt = prefix + '-' + ('000' + newSoCtNumber).slice(-4);
+    }
+    const newlyAddedRows = []; 
+    
+    const rowsToAppend = productDetails.map(product => {
+      const rowData = { ...generalInfo, ...product };
+      rowData.SO_CT = finalSoCt;
+      rowData.THANH_TIEN = (parseFloat(rowData.SO_LUONG) || 0) * (parseFloat(rowData.DON_GIA) || 0);
+      rowData.TIEN_THUE = rowData.THANH_TIEN * (parseFloat(rowData.THUE_SUAT) / 100 || 0);
+
+      const returnData = { ...rowData };
+      
+      if (rowData.NGAY_CT && typeof rowData.NGAY_CT === 'string') {
+        const dateObj = new Date(rowData.NGAY_CT);
+        rowData.NGAY_CT = dateObj; 
+        returnData.NGAY_CT = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), "dd/MM/yyyy");
+      }
+      if (rowData.NGAY_HD && typeof rowData.NGAY_HD === 'string' && rowData.NGAY_HD) {
+        const dateObj = new Date(rowData.NGAY_HD);
+        rowData.NGAY_HD = dateObj;
+        returnData.NGAY_HD = Utilities.formatDate(dateObj, Session.getScriptTimeZone(), "dd/MM/yyyy");
+      } else {
+         delete rowData.NGAY_HD;
+      }
+
+      const partnerCode = returnData.TK_NO;
+      returnData.customerInfo = (partnerCode && partnerMap[partnerCode]) ? partnerMap[partnerCode] : null;
+      newlyAddedRows.push(returnData);
+
+      return headers.map(header => rowData[header] !== undefined ? rowData[header] : "");
+    });
+
+    if (rowsToAppend.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, headers.length)
+           .setValues(rowsToAppend);
+    }
+    
+    refreshData();
+    return { 
+      status: 'success', 
+      message: 'Xuất kho thành công với số CT: ' + finalSoCt,
+      data: newlyAddedRows
+    };
+
+  } catch (e) {
+    Logger.log(e);
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+// =================================================================
+// HÀM SỬA DỮ LIỆU (UPDATE)
+// =================================================================
+function updateProduct(productData) {
+  try {
+    const originalMaKho = productData.original_MA_KHO;
+    const originalMaHang = productData.original_MA_HANG;
+    
+    // Step 1: Delete existing product group
+    deleteProducts([{ maKho: originalMaKho, maHang: originalMaHang }]);
+    
+    // Step 2: Add the updated product as a new entry
+    // We can reuse the addProduct function
+    return addProduct(productData);
+
+  } catch (e) {
+    Logger.log(e);
+    return { status: 'error', message: "Lỗi khi cập nhật sản phẩm: " + e.toString() };
+  }
+}
+
+function updateImportDoc(payload) {
+  try {
+    const soCt = payload.generalInfo.SO_CT;
+    if (!soCt) {
+      throw new Error("Không có Số Chứng Từ để cập nhật.");
+    }
+    // Step 1: Delete existing document
+    deleteDocuments(SHEET_DL_NHAP, [soCt]);
+
+    // Step 2: Re-add the document with updated data
+    // This is a simplified approach. We will just re-write the rows.
+     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_DL_NHAP);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
+    
+    const rowsToAppend = payload.productDetails.map(product => {
+      const rowData = { ...payload.generalInfo, ...product };
+      rowData.THANH_TIEN = (parseFloat(rowData.SO_LUONG) || 0) * (parseFloat(rowData.DON_GIA) || 0);
+      rowData.TIEN_THUE = rowData.THANH_TIEN * (parseFloat(rowData.THUE_SUAT) / 100 || 0);
+       if (rowData.NGAY_CT && typeof rowData.NGAY_CT === 'string') rowData.NGAY_CT = new Date(rowData.NGAY_CT);
+       if (rowData.NGAY_HD && typeof rowData.NGAY_HD === 'string' && rowData.NGAY_HD) rowData.NGAY_HD = new Date(rowData.NGAY_HD);
+      else delete rowData.NGAY_HD;
+      return headers.map(header => rowData[header] !== undefined ? rowData[header] : "");
+    });
+
+     if (rowsToAppend.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, headers.length)
+           .setValues(rowsToAppend);
+    }
+    
+    refreshData();
+    return { status: 'success', message: `Cập nhật thành công chứng từ ${soCt}` };
+
+  } catch (e) {
+    Logger.log(e);
+    return { status: 'error', message: "Lỗi khi cập nhật phiếu nhập: " + e.toString() };
+  }
+}
+
+function updateExportDoc(payload) {
+  try {
+    const soCt = payload.generalInfo.SO_CT;
+    if (!soCt) {
+      throw new Error("Không có Số Chứng Từ để cập nhật.");
+    }
+    // Step 1: Delete existing document
+    deleteDocuments(SHEET_DL_XUAT, [soCt]);
+    
+    // Step 2: Re-add the document
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_DL_XUAT);
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0].map(h => h.toString().trim());
+
+     const rowsToAppend = payload.productDetails.map(product => {
+      const rowData = { ...payload.generalInfo, ...product };
+      rowData.THANH_TIEN = (parseFloat(rowData.SO_LUONG) || 0) * (parseFloat(rowData.DON_GIA) || 0);
+      rowData.TIEN_THUE = rowData.THANH_TIEN * (parseFloat(rowData.THUE_SUAT) / 100 || 0);
+      if (rowData.NGAY_CT && typeof rowData.NGAY_CT === 'string') rowData.NGAY_CT = new Date(rowData.NGAY_CT);
+      if (rowData.NGAY_HD && typeof rowData.NGAY_HD === 'string' && rowData.NGAY_HD) rowData.NGAY_HD = new Date(rowData.NGAY_HD);
+      else delete rowData.NGAY_HD;
+      return headers.map(header => rowData[header] !== undefined ? rowData[header] : "");
+    });
+     if (rowsToAppend.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, rowsToAppend.length, headers.length)
+           .setValues(rowsToAppend);
+    }
+    
+    refreshData();
+    return { status: 'success', message: `Cập nhật thành công chứng từ ${soCt}` };
+
+  } catch (e) {
+    Logger.log(e);
+    return { status: 'error', message: "Lỗi khi cập nhật phiếu xuất: " + e.toString() };
+  }
+}
+
+
+// =================================================================
+// HÀM XOÁ DỮ LIỆU (DELETE)
+// =================================================================
+
+function deleteProducts(productsToDelete) {
+  try {
+    if (!productsToDelete || productsToDelete.length === 0) {
+      return { status: 'error', message: 'Không có sản phẩm nào được chọn để xóa.' };
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_DMHH);
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    const headers = values.shift();
+
+    const maKhoIndex = headers.indexOf('MA_KHO');
+    const maHangIndex = headers.indexOf('MA_HANG');
+
+    let rowsDeleted = 0;
+    // Iterate backwards to avoid issues with row index changes after deletion
+    for (let i = values.length - 1; i >= 0; i--) {
+      const row = values[i];
+      const rowMaKho = row[maKhoIndex];
+      const rowMaHang = row[maHangIndex];
+
+      const shouldDelete = productsToDelete.some(p => p.maKho === rowMaKho && p.maHang === rowMaHang);
+
+      if (shouldDelete) {
+        sheet.deleteRow(i + 2); // +2 because of 1-based index and header row
+        rowsDeleted++;
+      }
+    }
+
+    CacheService.getScriptCache().remove(SHEET_DMHH);
+    return { status: 'success', message: `Đã xóa thành công ${rowsDeleted} dòng sản phẩm.` };
+
+  } catch (e) {
+    Logger.log(e);
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+function deleteDocuments(sheetName, soCtList) {
+  try {
+    if (!soCtList || soCtList.length === 0) {
+      return { status: 'error', message: 'Không có chứng từ nào được chọn để xóa.' };
+    }
+    if (sheetName !== SHEET_DL_NHAP && sheetName !== SHEET_DL_XUAT) {
+      return { status: 'error', message: 'Tên sheet không hợp lệ.' };
+    }
+
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(sheetName);
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    const headers = values.shift();
+    const soCtIndex = headers.indexOf('SO_CT');
+    let rowsDeleted = 0;
+
+    for (let i = values.length - 1; i >= 0; i--) {
+      const row = values[i];
+      const rowSoCt = row[soCtIndex];
+      if (soCtList.includes(rowSoCt)) {
+        sheet.deleteRow(i + 2); // +2 because of 1-based index and header row
+        rowsDeleted++;
+      }
+    }
+
+    CacheService.getScriptCache().remove(sheetName);
+    return { status: 'success', message: `Đã xóa thành công ${rowsDeleted} dòng của ${soCtList.length} chứng từ.` };
+
+  } catch (e) {
+    Logger.log(e);
+    return { status: 'error', message: e.toString() };
+  }
+}
+
+// =================================================================
+// HÀM LẤY DỮ LIỆU ĐÃ QUA XỬ LÝ
+// =================================================================
+
+// Function to get a single document for editing
+function getSingleDoc(sheetName, soCt) {
+  const data = getSheetData(sheetName);
+  const docLines = data.filter(item => item.SO_CT === soCt);
+  if (docLines.length === 0) return null;
+
+  const generalInfo = { ...docLines[0] };
+  const productDetails = docLines.map(line => {
+    // Group SKUs back into parent products
+    const detail = {
+      MA_KHO: line.MA_KHO,
+      MA_HANG: line.MA_HANG,
+      SO_LUONG: line.SO_LUONG,
+      DON_GIA: line.DON_GIA,
+      THUE_SUAT: line.THUE_SUAT,
+      TK_NO: line.TK_NO,
+      TK_CO: line.TK_CO,
+    };
+    return detail;
+  });
+
+  // Consolidate product details
+  const consolidatedDetails = {};
+  docLines.forEach(line => {
+    const key = `${line.MA_KHO}-${line.MA_HANG}`;
+    if (!consolidatedDetails[key]) {
+      consolidatedDetails[key] = {
+        MA_KHO: line.MA_KHO,
+        MA_HANG: line.MA_HANG,
+        DON_GIA: line.DON_GIA,
+        THUE_SUAT: line.THUE_SUAT,
+        TK_NO: line.TK_NO,
+        TK_CO: line.TK_CO,
+        SO_LUONG: 0,
+        skuQuantities: {}
+      };
+    }
+    consolidatedDetails[key].skuQuantities[line.MA_SKU] = parseFloat(line.SO_LUONG) || 0;
+    consolidatedDetails[key].SO_LUONG += parseFloat(line.SO_LUONG) || 0;
+  });
+
+
+  return { generalInfo, productDetails: Object.values(consolidatedDetails) };
+}
+
+function getSingleImportDoc(soCt) {
+  return getSingleDoc(SHEET_DL_NHAP, soCt);
+}
+
+function getSingleExportDoc(soCt) {
+  return getSingleDoc(SHEET_DL_XUAT, soCt);
+}
+
+
+function getProducts() {
+  const products = getSheetData(SHEET_DMHH);
+  const imports = getSheetData(SHEET_DL_NHAP);
+  const exports = getSheetData(SHEET_DL_XUAT);
+
+  const importsBySku = imports.reduce((acc, item) => {
+    const sku = item.MA_SKU;
+    const qty = parseFloat(item.SO_LUONG) || 0;
+    if (sku) {
+      acc[sku] = (acc[sku] || 0) + qty;
+    }
+    return acc;
+  }, {});
+
+  const exportsBySku = exports.reduce((acc, item) => {
+    const sku = item.MA_SKU;
+    const qty = parseFloat(item.SO_LUONG) || 0;
+    if (sku) {
+      acc[sku] = (acc[sku] || 0) + qty;
+    }
+    return acc;
+  }, {});
+
+  const grouped = products.reduce((acc, sku) => {
+    if (!sku.MA_KHO || !sku.MA_HANG) return acc;
+
+    const groupKey = `${sku.MA_KHO}_${sku.MA_HANG}`; 
+    
+    if (!acc[groupKey]) {
+      acc[groupKey] = {
+        MA_KHO: sku.MA_KHO,
+        MA_HANG: sku.MA_HANG,
+        TEN_HANG: sku.TEN_HANG,
+        DVT: sku.DVT,
+        QUY_CACH: sku.QUY_CACH,
+        GHI_CHU: sku.GHI_CHU,
+        MAU_SAC_GOC: sku.MAU_SAC,
+        GIA_NHAP: sku.GIA_NHAP,
+        GIA_BAN: sku.GIA_BAN,
+        TONG_TON: 0,
+        TONG_THANH_TIEN: 0,
+        skus: []
+      };
+    }
+    
+    const slDk = parseFloat(sku.SL_DK) || 0;
+    const tongNhapPS = importsBySku[sku.MA_SKU] || 0;
+    const tongXuatPS = exportsBySku[sku.MA_SKU] || 0;
+
+    sku.TONG_NHAP_PS = tongNhapPS;
+    sku.TONG_XUAT_PS = tongXuatPS;
+    sku.TON_KHO_THUC_TE = slDk + tongNhapPS - tongXuatPS;
+    
+    const giaNhap = parseFloat(sku.GIA_NHAP) || 0;
+    sku.THANH_TIEN = sku.TON_KHO_THUC_TE * giaNhap;
+    
+    acc[groupKey].skus.push(sku);
+    acc[groupKey].TONG_TON += sku.TON_KHO_THUC_TE;
+    acc[groupKey].TONG_THANH_TIEN += sku.THANH_TIEN;
+    
+    return acc;
+  }, {});
+  
+  return Object.values(grouped);
+}
+
+function getImports() {
+  const imports = getSheetData(SHEET_DL_NHAP);
+  const partners = getSheetData(SHEET_DMTK);
+  const products = getSheetData(SHEET_DMHH);
+
+  const partnerMap = partners.reduce((map, partner) => {
+    if (partner.MA_TK) map[partner.MA_TK] = partner;
+    return map;
+  }, {});
+  
+  const productDetailsMap = products.reduce((map, sku) => {
+    if (sku.MA_SKU) map[sku.MA_SKU] = sku;
+    return map;
+  }, {});
+
+  const groupedImports = {};
+
+  imports.forEach(item => {
+    if (!item.SO_CT || !item.MA_HANG) return;
+
+    const groupKey = `${item.SO_CT}_${item.MA_HANG}`;
+    
+    if (!groupedImports[groupKey]) {
+      groupedImports[groupKey] = {
+        ...item,
+        TONG_SO_LUONG: 0,
+        TONG_THANH_TIEN: 0,
+        TONG_TIEN_THUE: 0,
+        sku_details: []
+      };
+      
+      const partnerCode = item.TK_CO;
+      if (partnerCode && partnerMap[partnerCode]) {
+        groupedImports[groupKey].supplierInfo = partnerMap[partnerCode];
+      }
+    }
+
+    const group = groupedImports[groupKey];
+    
+    const soLuong = parseFloat(item.SO_LUONG) || 0;
+    const thanhTien = parseFloat(item.THANH_TIEN) || 0;
+    const tienThue = parseFloat(item.TIEN_THUE) || 0;
+    const skuInfo = productDetailsMap[item.MA_SKU] || {};
+    
+    group.sku_details.push({
+      MA_SKU: item.MA_SKU,
+      KICH_CO: skuInfo.KICH_CO || '',
+      SO_LUONG: soLuong
+    });
+
+    group.TONG_SO_LUONG += soLuong;
+    group.TONG_THANH_TIEN += thanhTien;
+    group.TONG_TIEN_THUE += tienThue;
+    
+    group.TEN_HANG = skuInfo.TEN_HANG || item.TEN_HANG;
+  });
+  
+  const finalGroupedList = Object.values(groupedImports);
+
+  const parseDateString = (dateString) => {
+    if (!dateString || typeof dateString !== 'string') return null;
+    const parts = dateString.split('/');
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+  };
+
+  finalGroupedList.sort((a, b) => {
+    const dateA = parseDateString(a.NGAY_CT);
+    const dateB = parseDateString(b.NGAY_CT);
+    if (dateA > dateB) return -1;
+    if (dateA < dateB) return 1;
+    return b.SO_CT.localeCompare(a.SO_CT);
+  });
+
+  return finalGroupedList;
+}
+
+function getExports() {
+  const exports = getSheetData(SHEET_DL_XUAT);
+  const partners = getSheetData(SHEET_DMTK);
+  const products = getSheetData(SHEET_DMHH);
+
+  const partnerMap = partners.reduce((map, partner) => {
+    if (partner.MA_TK) map[partner.MA_TK] = partner;
+    return map;
+  }, {});
+  
+  const productDetailsMap = products.reduce((map, sku) => {
+    if (sku.MA_SKU) map[sku.MA_SKU] = sku;
+    return map;
+  }, {});
+
+  const groupedExports = {};
+
+  exports.forEach(item => {
+    if (!item.SO_CT || !item.MA_HANG) return;
+
+    const groupKey = `${item.SO_CT}_${item.MA_HANG}`;
+    
+    if (!groupedExports[groupKey]) {
+      groupedExports[groupKey] = {
+        ...item,
+        TONG_SO_LUONG: 0,
+        TONG_THANH_TIEN: 0,
+        TONG_TIEN_THUE: 0,
+        sku_details: []
+      };
+      
+      const partnerCode = item.TK_NO;
+      if (partnerCode && partnerMap[partnerCode]) {
+        groupedExports[groupKey].customerInfo = partnerMap[partnerCode];
+      }
+    }
+
+    const group = groupedExports[groupKey];
+    
+    const soLuong = parseFloat(item.SO_LUONG) || 0;
+    const thanhTien = parseFloat(item.THANH_TIEN) || 0;
+    const tienThue = parseFloat(item.TIEN_THUE) || 0;
+    const skuInfo = productDetailsMap[item.MA_SKU] || {};
+    
+    group.sku_details.push({
+      MA_SKU: item.MA_SKU,
+      KICH_CO: skuInfo.KICH_CO || '',
+      SO_LUONG: soLuong
+    });
+
+    group.TONG_SO_LUONG += soLuong;
+    group.TONG_THANH_TIEN += thanhTien;
+    group.TONG_TIEN_THUE += tienThue;
+    
+    group.TEN_HANG = skuInfo.TEN_HANG || item.TEN_HANG;
+  });
+  
+  const finalGroupedList = Object.values(groupedExports);
+
+  const parseDateString = (dateString) => {
+    if (!dateString || typeof dateString !== 'string') return null;
+    const parts = dateString.split('/');
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+  };
+
+  finalGroupedList.sort((a, b) => {
+    const dateA = parseDateString(a.NGAY_CT);
+    const dateB = parseDateString(b.NGAY_CT);
+    if (dateA > dateB) return -1;
+    if (dateA < dateB) return 1;
+    return b.SO_CT.localeCompare(a.SO_CT);
+  });
+
+  return finalGroupedList;
+}
+
+function getInventoryReport(options) {
+  options = options || {};
+  const { startDate, endDate } = options;
+  
+  const parseDate = (dateString) => {
+    if (!dateString || typeof dateString !== 'string') return null;
+    const parts = dateString.split('/');
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+  };
+  
+  const start = startDate ? new Date(startDate) : null;
+  if(start) start.setHours(0, 0, 0, 0);
+  
+  const end = endDate ? new Date(endDate) : null;
+  if(end) end.setHours(23, 59, 59, 999);
+
+  const allSkus = getSheetData(SHEET_DMHH);
+  const allImports = getSheetData(SHEET_DL_NHAP);
+  const allExports = getSheetData(SHEET_DL_XUAT);
+
+  const skuReportData = allSkus.map(sku => {
+    const skuCode = sku.MA_SKU;
+    if (!skuCode) return null;
+
+    let tonDauKy = parseFloat(sku.SL_DK) || 0;
+    let nhapTrongKy = 0;
+    let xuatTrongKy = 0;
+
+    allImports.forEach(imp => {
+      if (imp.MA_SKU === skuCode) {
+        const ngayCt = parseDate(imp.NGAY_CT);
+        if (ngayCt) {
+          const qty = parseFloat(imp.SO_LUONG) || 0;
+          if (start && ngayCt < start) {
+            tonDauKy += qty;
+          } else if ((!start || ngayCt >= start) && (!end || ngayCt <= end)) {
+            nhapTrongKy += qty;
+          }
+        }
+      }
+    });
+
+    allExports.forEach(exp => {
+      if (exp.MA_SKU === skuCode) {
+        const ngayCt = parseDate(exp.NGAY_CT);
+        if (ngayCt) {
+          const qty = parseFloat(exp.SO_LUONG) || 0;
+          if (start && ngayCt < start) {
+            tonDauKy -= qty;
+          } else if ((!start || ngayCt >= start) && (!end || ngayCt <= end)) {
+            xuatTrongKy += qty;
+          }
+        }
+      }
+    });
+
+    const tonCuoiKy = tonDauKy + nhapTrongKy - xuatTrongKy;
+    const giaNhap = parseFloat(sku.GIA_NHAP) || 0;
+
+    return {
+      ...sku,
+      tonDauKy: tonDauKy,
+      nhapTrongKy: nhapTrongKy,
+      xuatTrongKy: xuatTrongKy,
+      tonCuoiKy: tonCuoiKy,
+      giaTriTon: tonCuoiKy * giaNhap,
+    };
+  }).filter(Boolean);
+
+  const groupedReport = skuReportData.reduce((acc, sku) => {
+    if (!sku.MA_KHO || !sku.MA_HANG) return acc;
+    const groupKey = `${sku.MA_KHO}_${sku.MA_HANG}`;
+    
+    if (!acc[groupKey]) {
+      acc[groupKey] = {
+        MA_KHO: sku.MA_KHO,
+        MA_HANG: sku.MA_HANG,
+        TEN_HANG: sku.TEN_HANG,
+        DVT: sku.DVT,
+        QUY_CACH: sku.QUY_CACH,
+        MAU_SAC_GOC: sku.MAU_SAC,
+        tonDauKy: 0,
+        nhapTrongKy: 0,
+        xuatTrongKy: 0,
+        tonCuoiKy: 0,
+        giaTriTon: 0,
+        skus: []
+      };
+    }
+    
+    acc[groupKey].skus.push(sku);
+    acc[groupKey].tonDauKy += sku.tonDauKy;
+    acc[groupKey].nhapTrongKy += sku.nhapTrongKy;
+    acc[groupKey].xuatTrongKy += sku.xuatTrongKy;
+    acc[groupKey].tonCuoiKy += sku.tonCuoiKy;
+    acc[groupKey].giaTriTon += sku.giaTriTon;
+
+    return acc;
+  }, {});
+
+  return Object.values(groupedReport);
+}
+
+// START: === HÀM LẤY DỮ LIỆU CHO DASHBOARD (NÂNG CẤP) ===
+function getDashboardData() {
+  const imports = getSheetData(SHEET_DL_NHAP);
+  const exports = getSheetData(SHEET_DL_XUAT);
+  const partners = getSheetData(SHEET_DMTK);
+
+  const partnerMap = partners.reduce((map, partner) => {
+    if(partner.MA_TK) map[partner.MA_TK] = partner.TEN_KH;
+    return map;
+  }, {});
+  
+  const parseDate = (dateString) => {
+    if (!dateString || typeof dateString !== 'string') return null;
+    const parts = dateString.split('/');
+    return new Date(parts[2], parts[1] - 1, parts[0]);
+  };
+  
+  // Date ranges
+  const now = new Date();
+  const firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+
+  // 1. & 2. Doanh thu và Nhập kho theo đối tác (tháng này vs tháng trước)
+  const partnerData = {};
+
+  const processTransactions = (transactions, partnerField, type) => {
+    transactions.forEach(item => {
+      const partnerCode = item[partnerField];
+      if (partnerCode) {
+        const partnerName = partnerMap[partnerCode] || partnerCode;
+        if (!partnerData[partnerName]) {
+          partnerData[partnerName] = { 
+            revenueThisMonth: 0, revenueLastMonth: 0, 
+            importThisMonth: 0, importLastMonth: 0 
+          };
+        }
+        
+        const value = parseFloat(item.THANH_TIEN) || 0;
+        const date = parseDate(item.NGAY_CT);
+
+        if (date >= firstDayThisMonth) {
+          if (type === 'revenue') partnerData[partnerName].revenueThisMonth += value;
+          else partnerData[partnerName].importThisMonth += value;
+        } else if (date >= firstDayLastMonth && date <= lastDayLastMonth) {
+          if (type === 'revenue') partnerData[partnerName].revenueLastMonth += value;
+          else partnerData[partnerName].importLastMonth += value;
+        }
+      }
+    });
+  };
+
+  processTransactions(exports, 'TK_NO', 'revenue');
+  processTransactions(imports, 'TK_CO', 'import');
+
+  const sortedCustomers = Object.entries(partnerData)
+    .filter(([, data]) => data.revenueThisMonth > 0 || data.revenueLastMonth > 0)
+    .sort(([,a],[,b]) => b.revenueThisMonth - a.revenueThisMonth)
+    .slice(0, 5);
+
+  const topCustomers = sortedCustomers.reduce((acc, [name, data]) => {
+    acc[name] = { thisMonth: data.revenueThisMonth, lastMonth: data.revenueLastMonth };
+    return acc;
+  }, {});
+
+  const sortedSuppliers = Object.entries(partnerData)
+    .filter(([, data]) => data.importThisMonth > 0 || data.importLastMonth > 0)
+    .sort(([,a],[,b]) => b.importThisMonth - a.importThisMonth)
+    .slice(0, 5);
+  
+  const topSuppliers = sortedSuppliers.reduce((acc, [name, data]) => {
+    acc[name] = { thisMonth: data.importThisMonth, lastMonth: data.importLastMonth };
+    return acc;
+  }, {});
+
+
+  // 3. Hoạt động gần đây (nhóm theo SO_CT)
+  const combinedActivities = [
+    ...imports.map(i => ({...i, type: 'import'})),
+    ...exports.map(e => ({...e, type: 'export'}))
+  ].sort((a, b) => parseDate(b.NGAY_CT) - parseDate(a.NGAY_CT));
+  
+  const groupedActivities = {};
+  combinedActivities.forEach(item => {
+      if (!groupedActivities[item.SO_CT]) {
+          let partnerName = 'N/A';
+          if(item.type === 'import') {
+            partnerName = partnerMap[item.TK_CO] || 'Nhà cung cấp lẻ';
+          } else {
+            partnerName = partnerMap[item.TK_NO] || 'Khách lẻ';
+          }
+          groupedActivities[item.SO_CT] = {
+              soCt: item.SO_CT,
+              ngayCt: item.NGAY_CT,
+              type: item.type,
+              partner: partnerName,
+              value: 0
+          };
+      }
+      groupedActivities[item.SO_CT].value += parseFloat(item.THANH_TIEN) || 0;
+  });
+
+  const recentActivities = Object.values(groupedActivities).slice(0, 7);
+
+  // 4. Xu hướng doanh thu (90 ngày)
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(now.getDate() - 90);
+
+  const revenueTrend = {};
+  exports.forEach(item => {
+    const date = parseDate(item.NGAY_CT);
+    if(date >= ninetyDaysAgo) {
+      const dateString = item.NGAY_CT;
+      const value = parseFloat(item.THANH_TIEN) || 0;
+      revenueTrend[dateString] = (revenueTrend[dateString] || 0) + value;
+    }
+  });
+
+  return {
+    revenueByCustomer: topCustomers,
+    importBySupplier: topSuppliers,
+    recentActivities: recentActivities,
+    revenueTrend: revenueTrend
+  };
+}
+// END: === HÀM LẤY DỮ LIỆU CHO DASHBOARD ===
+
+
+function getUniqueMaKho() {
+  const data = getSheetData(SHEET_DMHH);
+  const maKhoSet = new Set(data.map(item => item.MA_KHO).filter(Boolean));
+  return Array.from(maKhoSet).sort();
+}
+
+
+// =================================================================
+// HÀM TIỆN ÍCH
+// =================================================================
+
+function refreshData() {
+  const cache = CacheService.getScriptCache();
+  cache.removeAll([SHEET_DMHH, SHEET_DL_NHAP, SHEET_DL_XUAT, SHEET_DMTK]);
+  return { status: 'success', message: 'Đã làm mới dữ liệu.' };
+}
