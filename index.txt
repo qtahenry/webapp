@@ -100,6 +100,24 @@
                         <div class="loader w-5 h-5 border-2 border-white border-t-transparent rounded-full mx-auto"></div>
                     </div>
                 </button>
+                
+                <!-- Debug Section (chỉ hiển thị trong development) -->
+                <div id="debug-section" class="mt-6 pt-4 border-t border-gray-200">
+                    <details class="text-sm">
+                        <summary class="cursor-pointer text-gray-600 hover:text-gray-800">
+                            🔧 Debug & Kiểm tra hệ thống
+                        </summary>
+                        <div class="mt-3 space-y-3">
+                            <button id="check-system-btn" class="w-full bg-gray-500 text-white py-2 px-3 rounded text-xs hover:bg-gray-600">
+                                Kiểm tra trạng thái hệ thống
+                            </button>
+                            <button id="debug-sheet-btn" class="w-full bg-gray-500 text-white py-2 px-3 rounded text-xs hover:bg-gray-600">
+                                Kiểm tra cấu trúc sheet
+                            </button>
+                            <div id="debug-output" class="text-xs bg-gray-100 p-2 rounded max-h-32 overflow-y-auto"></div>
+                        </div>
+                    </details>
+                </div>
             </form>
         </div>
     </div>
@@ -2944,6 +2962,74 @@
                 }
                 setTimeout(() => icon.removeClass('spinning'), 1000);
             }).refreshData();
+        });
+        
+        // =================================================================
+        // XỬ LÝ DEBUG VÀ KIỂM TRA HỆ THỐNG
+        // =================================================================
+        
+        $('#check-system-btn').on('click', function() {
+            const btn = $(this);
+            const originalText = btn.text();
+            
+            btn.prop('disabled', true).text('Đang kiểm tra...');
+            $('#debug-output').text('Đang kiểm tra hệ thống...');
+            
+            google.script.run.withSuccessHandler(function(response) {
+                btn.prop('disabled', false).text(originalText);
+                
+                if (response.status === 'success') {
+                    const data = response.data;
+                    let output = `✅ ${response.message}\n\n`;
+                    output += `📊 Tổng số người dùng: ${data.totalUsers}\n`;
+                    output += `👑 Admin: ${data.adminUsers}\n`;
+                    output += `💰 Kế toán: ${data.accountantUsers}\n`;
+                    output += `📦 Thủ kho: ${data.warehouseUsers}\n`;
+                    
+                    if (data.issues.length > 0) {
+                        output += `\n⚠️ Vấn đề phát hiện:\n`;
+                        data.issues.forEach(issue => {
+                            output += `• ${issue}\n`;
+                        });
+                    }
+                    
+                    $('#debug-output').text(output);
+                } else {
+                    $('#debug-output').text(`❌ Lỗi: ${response.message}`);
+                }
+            }).checkSystemStatus();
+        });
+        
+        $('#debug-sheet-btn').on('click', function() {
+            const btn = $(this);
+            const originalText = btn.text();
+            
+            btn.prop('disabled', true).text('Đang kiểm tra...');
+            $('#debug-output').text('Đang kiểm tra cấu trúc sheet...');
+            
+            google.script.run.withSuccessHandler(function(response) {
+                btn.prop('disabled', false).text(originalText);
+                
+                if (response.status === 'success') {
+                    const data = response.data;
+                    let output = `✅ ${response.message}\n\n`;
+                    output += `📋 Headers: ${data.headers.join(', ')}\n`;
+                    output += `📊 Tổng số dòng: ${data.totalRows}\n`;
+                    output += `📝 Dòng dữ liệu: ${data.dataRows}\n`;
+                    
+                    if (data.sampleData) {
+                        output += `\n📄 Dữ liệu mẫu:\n`;
+                        output += `USER: ${data.sampleData[data.headers.indexOf('USER')]}\n`;
+                        output += `ROLE: ${data.sampleData[data.headers.indexOf('ROLE')]}\n`;
+                        output += `STATUS: ${data.sampleData[data.headers.indexOf('STATUS')]}\n`;
+                        output += `KHO: ${data.sampleData[data.headers.indexOf('KHO')]}\n`;
+                    }
+                    
+                    $('#debug-output').text(output);
+                } else {
+                    $('#debug-output').text(`❌ Lỗi: ${response.message}`);
+                }
+            }).debugSheetStructure();
         });
         
         // =================================================================

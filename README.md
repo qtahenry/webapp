@@ -141,11 +141,26 @@ Hệ thống sẽ tự động cập nhật phân quyền khi thay đổi vai tr
 
 ## KHẮC PHỤC SỰ CỐ
 
+### Sử Dụng Tính Năng Debug
+
+Hệ thống có sẵn các tính năng debug để giúp khắc phục sự cố:
+
+1. **Kiểm tra trạng thái hệ thống**: Xem tổng quan về người dùng và phát hiện vấn đề
+2. **Kiểm tra cấu trúc sheet**: Xem cấu trúc sheet USERS có đúng không
+3. **Logs chi tiết**: Tất cả thao tác đều được log trong Google Apps Script
+
+### Cách Sử Dụng Debug
+
+1. Mở form đăng nhập
+2. Click vào "🔧 Debug & Kiểm tra hệ thống"
+3. Sử dụng các nút kiểm tra để xem thông tin chi tiết
+
 ### Lỗi Thường Gặp
 
 1. **"Tên đăng nhập hoặc mật khẩu không đúng"**
    - Kiểm tra USER và PASS trong sheet USERS
    - Đảm bảo STATUS = 'active'
+   - Sử dụng "Kiểm tra cấu trúc sheet" để xem cấu trúc
 
 2. **"Bạn không có quyền truy cập chức năng này"**
    - Kiểm tra ROLE trong sheet USERS
@@ -158,6 +173,11 @@ Hệ thống sẽ tự động cập nhật phân quyền khi thay đổi vai tr
 4. **Không thể sửa/xóa chứng từ**
    - Thủ kho chỉ được sửa/xóa khi chưa có giá
    - Kiểm tra DON_GIA trong chứng từ
+
+5. **"Sheet USERS có vấn đề"**
+   - Kiểm tra tên sheet có đúng là "USERS" không
+   - Kiểm tra các cột: USER, PASS, ROLE, STATUS, KHO
+   - Đảm bảo có ít nhất 1 dòng dữ liệu
 
 ### Hỗ Trợ
 

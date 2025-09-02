@@ -21,18 +21,243 @@ const USER_ROLES = {
 // Lưu trữ session người dùng
 let currentUserSession = null;
 
-function login(username, password) {
+// =================================================================
+// HÀM DEBUG VÀ KIỂM TRA
+// =================================================================
+
+function debugSheetStructure() {
   try {
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = ss.getSheetByName(SHEET_USERS);
+    
+    if (!sheet) {
+      return { status: 'error', message: 'Không tìm thấy sheet USERS' };
+    }
+    
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    
+    if (values.length < 2) {
+      return { status: 'error', message: 'Sheet USERS không có dữ liệu (cần ít nhất 1 header + 1 dòng dữ liệu)' };
+    }
+    
+    const headers = values[0].map(h => h.toString().trim());
+    const dataRows = values.slice(1);
+    
+    Logger.log('=== DEBUG SHEET USERS ===');
+    Logger.log('Headers:', headers);
+    Logger.log('Total rows:', values.length);
+    Logger.log('Data rows:', dataRows.length);
+    
+    // Kiểm tra các cột bắt buộc
+    const requiredColumns = ['USER', 'PASS', 'ROLE', 'STATUS', 'KHO'];
+    const missingColumns = requiredColumns.filter(col => !headers.includes(col));
+    
+    if (missingColumns.length > 0) {
+      return { 
+        status: 'error', 
+        message: `Thiếu các cột bắt buộc: ${missingColumns.join(', ')}. Các cột hiện có: ${headers.join(', ')}` 
+      };
+    }
+    
+    // Log dữ liệu mẫu
+    if (dataRows.length > 0) {
+      Logger.log('Sample data row:', dataRows[0]);
+      Logger.log('Sample user object:', {
+        USER: dataRows[0][headers.indexOf('USER')],
+        PASS: dataRows[0][headers.indexOf('PASS')],
+        ROLE: dataRows[0][headers.indexOf('ROLE')],
+        STATUS: dataRows[0][headers.indexOf('STATUS')],
+        KHO: dataRows[0][headers.indexOf('KHO')]
+      });
+    }
+    
+    return { 
+      status: 'success', 
+      message: 'Sheet USERS có cấu trúc đúng',
+      data: {
+        headers: headers,
+        totalRows: values.length,
+        dataRows: dataRows.length,
+        sampleData: dataRows.length > 0 ? dataRows[0] : null
+      }
+    };
+    
+  } catch (e) {
+    Logger.log('Error in debugSheetStructure: ' + e.toString());
+    return { status: 'error', message: 'Lỗi khi kiểm tra sheet: ' + e.toString() };
+  }
+}
+
+function testLogin(username, password) {
+  try {
+    Logger.log('=== TEST LOGIN ===');
+    Logger.log('Username:', username);
+    Logger.log('Password:', password);
+    
+    // Kiểm tra cấu trúc sheet trước
+    const sheetCheck = debugSheetStructure();
+    if (sheetCheck.status === 'error') {
+      return sheetCheck;
+    }
+    
+    // Lấy dữ liệu users
     const users = getSheetData(SHEET_USERS);
-    const user = users.find(u => 
-      u.USER === username && 
-      u.PASS === password && 
-      u.STATUS === 'active'
-    );
+    Logger.log('Total users from getSheetData:', users.length);
+    
+    if (users.length === 0) {
+      return { status: 'error', message: 'Không có dữ liệu người dùng nào trong sheet USERS' };
+    }
+    
+    // Log dữ liệu users để debug
+    Logger.log('Users data:', users);
+    
+    // Tìm user
+    const user = users.find(u => {
+      Logger.log('Checking user:', u);
+      Logger.log('Comparing USER:', u.USER, 'with username:', username);
+      Logger.log('Comparing PASS:', u.PASS, 'with password:', password);
+      Logger.log('User STATUS:', u.STATUS);
+      
+      return u.USER === username && u.PASS === password && u.STATUS === 'active';
+    });
     
     if (!user) {
+      Logger.log('User not found or invalid');
       return { status: 'error', message: 'Tên đăng nhập hoặc mật khẩu không đúng, hoặc tài khoản đã bị khóa.' };
     }
+    
+    Logger.log('User found:', user);
+    return { status: 'success', message: 'Test login thành công', user: user };
+    
+  } catch (e) {
+    Logger.log('Error in testLogin: ' + e.toString());
+    return { status: 'error', message: 'Lỗi khi test login: ' + e.toString() };
+  }
+}
+
+function checkSystemStatus() {
+  try {
+    Logger.log('=== SYSTEM STATUS CHECK ===');
+    
+    // Kiểm tra sheet USERS
+    const sheetCheck = debugSheetStructure();
+    if (sheetCheck.status === 'error') {
+      return { status: 'error', message: 'Sheet USERS có vấn đề: ' + sheetCheck.message };
+    }
+    
+    // Lấy dữ liệu users
+    const users = getSheetData(SHEET_USERS);
+    Logger.log('Total users:', users.length);
+    
+    // Kiểm tra có admin không
+    const adminUsers = users.filter(u => u.ROLE === 'admin' && u.STATUS === 'active');
+    const accountantUsers = users.filter(u => u.ROLE === 'accountant' && u.STATUS === 'active');
+    const warehouseUsers = users.filter(u => u.ROLE === 'warehouse_keeper' && u.STATUS === 'active');
+    
+    Logger.log('Admin users:', adminUsers.length);
+    Logger.log('Accountant users:', accountantUsers.length);
+    Logger.log('Warehouse users:', warehouseUsers.length);
+    
+    // Kiểm tra các vấn đề
+    const issues = [];
+    
+    if (adminUsers.length === 0) {
+      issues.push('Không có tài khoản admin nào hoạt động');
+    }
+    
+    if (users.length === 0) {
+      issues.push('Không có người dùng nào trong hệ thống');
+    }
+    
+    // Kiểm tra dữ liệu không hợp lệ
+    const invalidUsers = users.filter(u => !u.USER || !u.PASS || !u.ROLE || !u.STATUS);
+    if (invalidUsers.length > 0) {
+      issues.push(`${invalidUsers.length} người dùng có dữ liệu không đầy đủ`);
+    }
+    
+    return {
+      status: 'success',
+      message: 'Kiểm tra hệ thống hoàn tất',
+      data: {
+        totalUsers: users.length,
+        adminUsers: adminUsers.length,
+        accountantUsers: accountantUsers.length,
+        warehouseUsers: warehouseUsers.length,
+        issues: issues,
+        sheetStructure: sheetCheck.data
+      }
+    };
+    
+  } catch (e) {
+    Logger.log('Error in checkSystemStatus: ' + e.toString());
+    return { status: 'error', message: 'Lỗi khi kiểm tra hệ thống: ' + e.toString() };
+  }
+}
+
+function login(username, password) {
+  try {
+    Logger.log('=== LOGIN ATTEMPT ===');
+    Logger.log('Username:', username);
+    Logger.log('Password:', password);
+    
+    // Kiểm tra input
+    if (!username || !password) {
+      Logger.log('Missing username or password');
+      return { status: 'error', message: 'Vui lòng nhập đầy đủ tên đăng nhập và mật khẩu.' };
+    }
+    
+    // Kiểm tra cấu trúc sheet trước
+    const sheetCheck = debugSheetStructure();
+    if (sheetCheck.status === 'error') {
+      Logger.log('Sheet structure error:', sheetCheck.message);
+      return { status: 'error', message: 'Lỗi cấu trúc dữ liệu: ' + sheetCheck.message };
+    }
+    
+    // Lấy dữ liệu users
+    const users = getSheetData(SHEET_USERS);
+    Logger.log('Total users from getSheetData:', users.length);
+    
+    if (users.length === 0) {
+      Logger.log('No users found in sheet');
+      return { status: 'error', message: 'Không có dữ liệu người dùng nào trong hệ thống.' };
+    }
+    
+    // Log dữ liệu users để debug (chỉ log username và status, không log password)
+    Logger.log('Available users:', users.map(u => ({ USER: u.USER, ROLE: u.ROLE, STATUS: u.STATUS, KHO: u.KHO })));
+    
+    // Tìm user
+    const user = users.find(u => {
+      const userMatch = u.USER === username;
+      const passMatch = u.PASS === password;
+      const statusActive = u.STATUS === 'active';
+      
+      Logger.log(`User ${u.USER}: USER match=${userMatch}, PASS match=${passMatch}, STATUS active=${statusActive}`);
+      
+      return userMatch && passMatch && statusActive;
+    });
+    
+    if (!user) {
+      Logger.log('User not found or invalid credentials');
+      
+      // Kiểm tra từng điều kiện để đưa ra thông báo cụ thể
+      const foundUser = users.find(u => u.USER === username);
+      if (!foundUser) {
+        return { status: 'error', message: 'Tên đăng nhập không tồn tại trong hệ thống.' };
+      }
+      
+      if (foundUser.PASS !== password) {
+        return { status: 'error', message: 'Mật khẩu không đúng.' };
+      }
+      
+      if (foundUser.STATUS !== 'active') {
+        return { status: 'error', message: 'Tài khoản đã bị khóa hoặc không hoạt động.' };
+      }
+      
+      return { status: 'error', message: 'Tên đăng nhập hoặc mật khẩu không đúng.' };
+    }
+    
+    Logger.log('User found and validated:', { USER: user.USER, ROLE: user.ROLE, STATUS: user.STATUS, KHO: user.KHO });
     
     // Tạo session
     currentUserSession = {
@@ -41,6 +266,8 @@ function login(username, password) {
       kho: user.KHO,
       loginTime: new Date()
     };
+    
+    Logger.log('Session created:', currentUserSession);
     
     return { 
       status: 'success', 
