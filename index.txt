@@ -79,7 +79,7 @@
                 <li><a href="#import" class="sidebar-link flex items-center space-x-3 px-6 py-3 text-gray-600 hover:bg-gray-100"><i class="ph-fill ph-arrow-square-in text-xl"></i><span>Nhập kho</span></a></li>
                 <li><a href="#export" class="sidebar-link flex items-center space-x-3 px-6 py-3 text-gray-600 hover:bg-gray-100"><i class="ph-fill ph-arrow-square-out text-xl"></i><span>Xuất kho</span></a></li>
                 <li><a href="#inventory" class="sidebar-link flex items-center space-x-3 px-6 py-3 text-gray-600 hover:bg-gray-100"><i class="ph-fill ph-archive text-xl"></i><span>Tồn kho</span></a></li>
-                <li><a href="#settings" class="sidebar-link flex items-center space-x-3 px-6 py-3 text-gray-600 hover:bg-gray-100"><i class="ph-fill ph-gear-six text-xl"></i><span>Cài đặt</span></a></li>
+                <li id="settings-menu-item" class="hidden"><a href="#settings" class="sidebar-link flex items-center space-x-3 px-6 py-3 text-gray-600 hover:bg-gray-100"><i class="ph-fill ph-gear-six text-xl"></i><span>Cài đặt</span></a></li>
             </ul>
         </nav>
         <div class="p-6 border-t">
@@ -99,8 +99,22 @@
                     <i id="refresh-icon" class="ph-bold ph-arrows-clockwise text-xl"></i>
                 </button>
                 <div class="flex items-center space-x-2 text-gray-700">
-                    <span>Xin chào, Admin</span>
-                    <i class="ph-fill ph-user-circle text-2xl"></i>
+                    <span id="user-greeting">Xin chào, <span id="user-name">...</span></span>
+                    <div class="relative">
+                        <button id="user-menu-btn" class="flex items-center space-x-2 text-gray-700 hover:text-blue-600 transition-colors">
+                            <i class="ph-fill ph-user-circle text-2xl"></i>
+                            <i class="ph-bold ph-caret-down text-sm"></i>
+                        </button>
+                        <div id="user-menu" class="absolute right-0 top-full mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-50 hidden">
+                            <div class="px-4 py-2 text-sm text-gray-500 border-b">
+                                <div id="user-email">...</div>
+                                <div id="user-role">...</div>
+                            </div>
+                            <button id="logout-btn" class="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="ph-bold ph-sign-out mr-2"></i>Đăng xuất
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </header>
@@ -340,6 +354,115 @@
                     </div>
                 </div>
                 <!-- END: === TRANG TỒN KHO === -->
+
+                <!-- Trang Cài đặt -->
+                <div id="settings" class="page-section hidden">
+                    <div class="bg-white p-6 rounded-lg shadow">
+                        <div class="flex justify-between items-center mb-6">
+                            <h2 class="text-2xl font-bold text-gray-800">Cài đặt hệ thống</h2>
+                        </div>
+                        
+                        <!-- Tab Navigation -->
+                        <div class="border-b border-gray-200 mb-6">
+                            <nav class="flex space-x-8">
+                                <button class="settings-tab-btn active py-2 px-1 border-b-2 border-blue-500 text-blue-600 font-medium" data-tab="users">
+                                    Quản lý người dùng
+                                </button>
+                                <button class="settings-tab-btn py-2 px-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-medium" data-tab="permissions">
+                                    Phân quyền
+                                </button>
+                            </nav>
+                        </div>
+                        
+                        <!-- Users Management Tab -->
+                        <div id="users-tab" class="settings-tab-content">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-semibold text-gray-700">Danh sách người dùng</h3>
+                                <button id="refresh-users-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                                    <i class="ph-bold ph-arrows-clockwise mr-2"></i>Làm mới
+                                </button>
+                            </div>
+                            
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm text-left">
+                                    <thead class="bg-gray-50 text-gray-500 uppercase">
+                                        <tr>
+                                            <th class="p-3">Email</th>
+                                            <th class="p-3">Họ tên</th>
+                                            <th class="p-3">Vai trò</th>
+                                            <th class="p-3">Kho được phân công</th>
+                                            <th class="p-3">Trạng thái</th>
+                                            <th class="p-3">Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="users-table-body">
+                                        <tr id="users-loading-row">
+                                            <td colspan="6" class="text-center p-6">
+                                                <div class="flex justify-center items-center space-x-2">
+                                                    <div class="loader"></div>
+                                                    <span>Đang tải danh sách người dùng...</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <!-- Permissions Tab -->
+                        <div id="permissions-tab" class="settings-tab-content hidden">
+                            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                                <h4 class="text-blue-800 font-semibold mb-2">Hướng dẫn phân quyền</h4>
+                                <ul class="text-blue-700 text-sm space-y-1">
+                                    <li><strong>Admin:</strong> Toàn quyền trên hệ thống</li>
+                                    <li><strong>Kế toán:</strong> Có thể điền giá, tạo mã, xem báo cáo</li>
+                                    <li><strong>Thủ kho:</strong> Chỉ quản lý kho được phân công, không được điền giá</li>
+                                </ul>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                <div class="bg-white border border-gray-200 rounded-lg p-4">
+                                    <h4 class="font-semibold text-gray-700 mb-3">Cập nhật vai trò người dùng</h4>
+                                    <form id="update-role-form" class="space-y-3">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Chọn người dùng</label>
+                                            <select id="user-select" class="border rounded-md w-full py-2 px-3" required>
+                                                <option value="">Chọn người dùng...</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Vai trò mới</label>
+                                            <select id="role-select" class="border rounded-md w-full py-2 px-3" required>
+                                                <option value="">Chọn vai trò...</option>
+                                                <option value="admin">Admin</option>
+                                                <option value="accountant">Kế toán</option>
+                                                <option value="warehouse_keeper">Thủ kho</option>
+                                            </select>
+                                        </div>
+                                        <div id="warehouse-assignment" class="hidden">
+                                            <label class="block text-sm font-medium text-gray-700 mb-1">Kho được phân công (cách nhau bởi dấu phẩy)</label>
+                                            <input type="text" id="assigned-warehouses" placeholder="VD: KHO1, KHO2" class="border rounded-md w-full py-2 px-3">
+                                        </div>
+                                        <button type="submit" class="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700">
+                                            Cập nhật vai trò
+                                        </button>
+                                    </form>
+                                </div>
+                                
+                                <div class="bg-white border border-gray-200 rounded-lg p-4">
+                                    <h4 class="font-semibold text-gray-700 mb-3">Thông tin người dùng hiện tại</h4>
+                                    <div id="current-user-info" class="space-y-2 text-sm">
+                                        <div><strong>Email:</strong> <span id="current-user-email">-</span></div>
+                                        <div><strong>Vai trò:</strong> <span id="current-user-role">-</span></div>
+                                        <div><strong>Kho được phân công:</strong> <span id="current-user-warehouses">-</span></div>
+                                        <div><strong>Quyền chỉnh sửa giá:</strong> <span id="current-user-price-edit">-</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- END: === TRANG CÀI ĐẶT === -->
 
             </div>
         </main>
@@ -808,6 +931,11 @@
         let dataLoaded = { products: false, import: false, export: false, inventory: false, dashboard: false };
         let currentEditingImportRowId = null; // Dùng cho modal SKU của phiếu nhập
         let currentEditingExportRowId = null; // Dùng cho modal SKU của phiếu xuất
+        
+        // Thông tin người dùng và phân quyền
+        let currentUser = null;
+        let userPermissions = [];
+        let userWarehouses = [];
 
         // =================================================================
         // HÀM TIỆN ÍCH
@@ -845,6 +973,115 @@
         $('#confirm-cancel-btn').on('click', () => closeModal('#confirmationModal'));
 
         // =================================================================
+        // HỆ THỐNG PHÂN QUYỀN
+        // =================================================================
+        
+        function initializeUserSystem() {
+            // Lấy thông tin người dùng từ server
+            google.script.run.withSuccessHandler(function(response) {
+                if (response.status === 'success') {
+                    currentUser = response.data.user;
+                    userPermissions = response.data.permissions;
+                    userWarehouses = response.data.warehouses;
+                    
+                    // Cập nhật giao diện theo quyền
+                    updateUIByPermissions();
+                    updateUserInfoDisplay();
+                } else {
+                    console.error('Không thể lấy thông tin người dùng:', response.message);
+                }
+            }).getCurrentUserInfo();
+        }
+        
+        function updateUIByPermissions() {
+            if (!currentUser) return;
+            
+            // Hiển thị/ẩn tab cài đặt theo quyền
+            if (currentUser.ROLE === 'admin') {
+                $('#settings-menu-item').show();
+            } else {
+                $('#settings-menu-item').hide();
+            }
+            
+            // Cập nhật quyền chỉnh sửa giá
+            updatePriceEditPermissions();
+            
+            // Cập nhật quyền theo kho
+            updateWarehousePermissions();
+        }
+        
+        function updatePriceEditPermissions() {
+            const canEditPrice = currentUser && (currentUser.ROLE === 'admin' || currentUser.ROLE === 'accountant');
+            
+            // Ẩn/hiện các trường giá trong form sản phẩm
+            $('input[name="GIA_NHAP"], input[name="GIA_BAN"]').prop('readonly', !canEditPrice);
+            if (!canEditPrice) {
+                $('input[name="GIA_NHAP"], input[name="GIA_BAN"]').addClass('bg-gray-100');
+            } else {
+                $('input[name="GIA_NHAP"], input[name="GIA_BAN"]').removeClass('bg-gray-100');
+            }
+            
+            // Ẩn/hiện các trường giá trong form nhập/xuất
+            $('input[name="DON_GIA"]').prop('readonly', !canEditPrice);
+            if (!canEditPrice) {
+                $('input[name="DON_GIA"]').addClass('bg-gray-100');
+            } else {
+                $('input[name="DON_GIA"]').removeClass('bg-gray-100');
+            }
+        }
+        
+        function updateWarehousePermissions() {
+            if (!currentUser || currentUser.ROLE === 'admin') return;
+            
+            // Lọc kho theo quyền của người dùng
+            if (userWarehouses.length > 0) {
+                // Cập nhật filter kho
+                $('#khoFilter option').each(function() {
+                    const khoValue = $(this).val();
+                    if (khoValue && !userWarehouses.includes(khoValue)) {
+                        $(this).hide();
+                    } else {
+                        $(this).show();
+                    }
+                });
+                
+                // Cập nhật filter kho trong form nhập/xuất
+                $('#import-kho-filter option, #export-kho-filter option').each(function() {
+                    const khoValue = $(this).val();
+                    if (khoValue && !userWarehouses.includes(khoValue)) {
+                        $(this).hide();
+                    } else {
+                        $(this).show();
+                    }
+                });
+            }
+        }
+        
+        function updateUserInfoDisplay() {
+            if (!currentUser) return;
+            
+            // Cập nhật thông tin người dùng trong header
+            $('#user-name').text(currentUser.FULL_NAME || currentUser.EMAIL.split('@')[0]);
+            $('#user-email').text(currentUser.EMAIL);
+            $('#user-role').text(getRoleDisplayName(currentUser.ROLE));
+            
+            // Cập nhật thông tin trong tab cài đặt
+            $('#current-user-email').text(currentUser.EMAIL);
+            $('#current-user-role').text(getRoleDisplayName(currentUser.ROLE));
+            $('#current-user-warehouses').text(currentUser.ASSIGNED_WAREHOUSES || 'Tất cả kho');
+            $('#current-user-price-edit').text(currentUser.ROLE === 'admin' || currentUser.ROLE === 'accountant' ? 'Có' : 'Không');
+        }
+        
+        function getRoleDisplayName(role) {
+            const roleNames = {
+                'admin': 'Admin',
+                'accountant': 'Kế toán',
+                'warehouse_keeper': 'Thủ kho'
+            };
+            return roleNames[role] || role;
+        }
+        
+        // =================================================================
         // ĐIỀU HƯỚNG VÀ TẢI DỮ LIỆU
         // =================================================================
         function switchTab(tabId) {
@@ -866,14 +1103,17 @@
                 return;
             }
 
-            if (tabId !== 'settings') {
-                if (!dataLoaded[tabId]) {
-                    loadDataForTab(tabId);
-                } else { 
-                    if (tabId === 'products') filterAndDisplayProducts();
-                    if (tabId === 'import') filterAndDisplayImports();
-                    if (tabId === 'export') filterAndDisplayExports();
-                }
+            if (tabId === 'settings') {
+                loadSettingsData();
+                return;
+            }
+
+            if (!dataLoaded[tabId]) {
+                loadDataForTab(tabId);
+            } else { 
+                if (tabId === 'products') filterAndDisplayProducts();
+                if (tabId === 'import') filterAndDisplayImports();
+                if (tabId === 'export') filterAndDisplayExports();
             }
         }
 
@@ -881,6 +1121,9 @@
         
         // Tải dữ liệu Dashboard lần đầu
         switchTab('dashboard');
+        
+        // Khởi tạo hệ thống người dùng
+        initializeUserSystem();
 
         function loadDataForTab(tabId, callback) {
             let loadingRow = $(`#${tabId}-loading-row, #loading-row`);
@@ -2648,6 +2891,180 @@
                 }
                 setTimeout(() => icon.removeClass('spinning'), 1000);
             }).refreshData();
+        });
+        
+        // =================================================================
+        // XỬ LÝ TAB CÀI ĐẶT
+        // =================================================================
+        
+        function loadSettingsData() {
+            if (currentUser && currentUser.ROLE === 'admin') {
+                loadUsersList();
+                populateUserSelect();
+            }
+        }
+        
+        function loadUsersList() {
+            $('#users-loading-row').show();
+            google.script.run.withSuccessHandler(function(response) {
+                $('#users-loading-row').hide();
+                if (response.status === 'success') {
+                    displayUsersList(response.data);
+                } else {
+                    showToast('Lỗi: ' + response.message);
+                }
+            }).getAllUsers();
+        }
+        
+        function displayUsersList(users) {
+            const tbody = $('#users-table-body');
+            tbody.find('tr:not(#users-loading-row)').remove();
+            
+            users.forEach(user => {
+                const row = `
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-3">${user.EMAIL}</td>
+                        <td class="p-3">${user.FULL_NAME || '-'}</td>
+                        <td class="p-3">
+                            <span class="px-2 py-1 text-xs rounded-full ${getRoleBadgeClass(user.ROLE)}">
+                                ${getRoleDisplayName(user.ROLE)}
+                            </span>
+                        </td>
+                        <td class="p-3">${user.ASSIGNED_WAREHOUSES || 'Tất cả kho'}</td>
+                        <td class="p-3">
+                            <span class="px-2 py-1 text-xs rounded-full ${user.STATUS === 'active' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                ${user.STATUS === 'active' ? 'Hoạt động' : 'Không hoạt động'}
+                            </span>
+                        </td>
+                        <td class="p-3">
+                            <button class="edit-user-btn text-blue-600 hover:text-blue-800 text-sm" data-email="${user.EMAIL}">
+                                <i class="ph-bold ph-pencil-simple mr-1"></i>Sửa
+                            </button>
+                        </td>
+                    </tr>
+                `;
+                tbody.append(row);
+            });
+        }
+        
+        function getRoleBadgeClass(role) {
+            const classes = {
+                'admin': 'bg-red-100 text-red-800',
+                'accountant': 'bg-blue-100 text-blue-800',
+                'warehouse_keeper': 'bg-green-100 text-green-800'
+            };
+            return classes[role] || 'bg-gray-100 text-gray-800';
+        }
+        
+        function populateUserSelect() {
+            google.script.run.withSuccessHandler(function(response) {
+                if (response.status === 'success') {
+                    const select = $('#user-select');
+                    select.find('option:not(:first)').remove();
+                    
+                    response.data.forEach(user => {
+                        select.append(`<option value="${user.EMAIL}">${user.FULL_NAME || user.EMAIL} (${getRoleDisplayName(user.ROLE)})</option>`);
+                    });
+                }
+            }).getAllUsers();
+        }
+        
+        // Xử lý tab cài đặt
+        $('.settings-tab-btn').on('click', function() {
+            const tabId = $(this).data('tab');
+            
+            // Cập nhật active state
+            $('.settings-tab-btn').removeClass('active border-blue-500 text-blue-600').addClass('border-transparent text-gray-500');
+            $(this).addClass('active border-blue-500 text-blue-600');
+            
+            // Hiển thị nội dung tab
+            $('.settings-tab-content').addClass('hidden');
+            $(`#${tabId}-tab`).removeClass('hidden');
+        });
+        
+        // Xử lý thay đổi role
+        $('#role-select').on('change', function() {
+            const role = $(this).val();
+            if (role === 'warehouse_keeper') {
+                $('#warehouse-assignment').show();
+            } else {
+                $('#warehouse-assignment').hide();
+            }
+        });
+        
+        // Xử lý form cập nhật role
+        $('#update-role-form').on('submit', function(e) {
+            e.preventDefault();
+            
+            const userEmail = $('#user-select').val();
+            const newRole = $('#role-select').val();
+            const assignedWarehouses = $('#assigned-warehouses').val();
+            
+            if (!userEmail || !newRole) {
+                showToast('Vui lòng chọn người dùng và vai trò');
+                return;
+            }
+            
+            google.script.run.withSuccessHandler(function(response) {
+                if (response.status === 'success') {
+                    showToast(response.message);
+                    loadUsersList();
+                    populateUserSelect();
+                    
+                    // Reset form
+                    $('#update-role-form')[0].reset();
+                    $('#warehouse-assignment').hide();
+                } else {
+                    showToast('Lỗi: ' + response.message);
+                }
+            }).updateUserRole(userEmail, newRole, assignedWarehouses);
+        });
+        
+        // Xử lý nút làm mới danh sách người dùng
+        $('#refresh-users-btn').on('click', function() {
+            loadUsersList();
+        });
+        
+        // Xử lý menu người dùng
+        $('#user-menu-btn').on('click', function() {
+            $('#user-menu').toggleClass('hidden');
+        });
+        
+        // Ẩn menu khi click ra ngoài
+        $(document).on('click', function(e) {
+            if (!$(e.target).closest('#user-menu-btn, #user-menu').length) {
+                $('#user-menu').addClass('hidden');
+            }
+        });
+        
+        // Xử lý đăng xuất
+        $('#logout-btn').on('click', function() {
+            // Reload trang để đăng xuất
+            location.reload();
+        });
+        
+        // Xử lý sửa người dùng
+        $(document).on('click', '.edit-user-btn', function() {
+            const userEmail = $(this).data('email');
+            
+            // Tìm thông tin người dùng
+            google.script.run.withSuccessHandler(function(response) {
+                if (response.status === 'success') {
+                    const user = response.data.find(u => u.EMAIL === userEmail);
+                    if (user) {
+                        $('#user-select').val(user.EMAIL);
+                        $('#role-select').val(user.ROLE);
+                        $('#assigned-warehouses').val(user.ASSIGNED_WAREHOUSES || '');
+                        
+                        if (user.ROLE === 'warehouse_keeper') {
+                            $('#warehouse-assignment').show();
+                        }
+                        
+                        // Chuyển sang tab permissions
+                        $('.settings-tab-btn[data-tab="permissions"]').click();
+                    }
+                }
+            }).getAllUsers();
         });
     });
     </script>
